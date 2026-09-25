@@ -1,0 +1,179 @@
+.methodology-page {
+  position: relative;
+  min-height: 100vh;
+  overflow: hidden;
+}
+
+.methodology-hero {
+  position: relative;
+  z-index: 1;
+  padding: 60px 24px 40px;
+  text-align: center;
+}
+
+.methodology-title {
+  font-size: 42px;
+  font-weight: 700;
+  line-height: 1.15;
+  color: var(--color-text);
+  letter-spacing: -1px;
+  margin: 20px 0;
+}
+
+.methodology-title-accent {
+  color: var(--color-accent);
+  text-shadow: 0 0 24px rgba(0, 212, 170, 0.4);
+}
+
+.methodology-subtitle {
+  font-size: 16px;
+  color: var(--color-text-muted);
+  max-width: 580px;
+  margin: 0 auto;
+  line-height: 1.6;
+}
+
+.methodology-explain {
+  position: relative;
+  z-index: 1;
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 20px 24px 50px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+}
+
+.methodology-explain-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 28px;
+  transition: transform 0.2s ease, border-color 0.2s ease;
+}
+
+.methodology-explain-card:hover {
+  transform: translateY(-3px);
+  border-color: var(--color-accent);
+}
+
+.methodology-step-tag {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-accent);
+  letter-spacing: 1px;
+  display: block;
+  margin-bottom: 12px;
+}
+
+.methodology-explain-card h3 {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--color-text);
+  margin-bottom: 10px;
+}
+
+.methodology-explain-card p {
+  font-size: 14px;
+  color: var(--color-text-muted);
+  line-height: 1.6;
+}
+
+.methodology-figure {
+  position: relative;
+  z-index: 1;
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 10px 24px 60px;
+}
+
+.methodology-figure img {
+  width: 100%;
+  border-radius: 14px;
+  border: 1px solid var(--color-border);
+  display: block;
+}
+
+.methodology-figure-caption {
+  font-size: 13px;
+  color: var(--color-text-muted);
+  text-align: center;
+  max-width: 640px;
+  margin: 18px auto 0;
+  line-height: 1.6;
+}
+
+.methodology-stat-banner {
+  position: relative;
+  z-index: 1;
+  background: var(--color-surface);
+  border-top: 1px solid var(--color-border);
+  padding: 56px 24px;
+  display: flex;
+  justify-content: center;
+  gap: 64px;
+}
+
+.methodology-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  max-width: 220px;
+}
+
+.methodology-stat-value {
+  font-family: var(--font-mono);
+  font-size: 40px;
+  font-weight: 700;
+  color: var(--color-accent);
+  letter-spacing: -1px;
+  text-shadow: 0 0 20px rgba(0, 212, 170, 0.35);
+}
+
+.methodology-stat-label {
+  font-size: 13px;
+  color: var(--color-text-muted);
+  margin-top: 8px;
+  line-height: 1.5;
+}
+
+.methodology-honesty {
+  position: relative;
+  z-index: 1;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 60px 24px 90px;
+}
+
+.methodology-honesty h3 {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--color-text);
+  margin-bottom: 16px;
+}
+
+.methodology-honesty p {
+  font-size: 14.5px;
+  color: var(--color-text-muted);
+  line-height: 1.7;
+  margin-bottom: 14px;
+}
+
+.methodology-honesty em {
+  color: var(--color-text);
+  font-style: normal;
+  font-weight: 600;
+}
+
+@media (max-width: 800px) {
+  .methodology-explain {
+    grid-template-columns: 1fr;
+  }
+  .methodology-stat-banner {
+    flex-direction: column;
+    align-items: center;
+    gap: 32px;
+  }
+}
