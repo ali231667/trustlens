@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 .env
 *.pkl
+backend/trustlens.db
 !backend/fake_follower_model.pkl
 node_modules/
 .DS_Store
