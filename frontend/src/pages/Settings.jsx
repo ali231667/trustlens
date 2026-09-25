@@ -1,16 +1,27 @@
+import { Navigate } from 'react-router-dom'
 import Navbar from '../components/Navbar'
 import '../components/Navbar.css'
 import './Settings.css'
+import { useAuth } from '../context/AuthContext'
 
 function Settings() {
+  const { user, loading } = useAuth()
+
+  if (loading) return null
+  if (!user) return <Navigate to="/login" replace />
+
   return (
     <div className="settings-page">
+      <div className="glow-backdrop" />
       <Navbar />
 
       <div className="settings-hero">
-        <div className="settings-hero-shape"></div>
-        <div className="settings-eyebrow">ACCOUNT</div>
+        <div className="eyebrow-chip">
+          <span className="eyebrow-dot" />
+          ACCOUNT
+        </div>
         <h1 className="settings-title">Manage your account</h1>
+        <p className="settings-lede">Update your details, change your password, or close your account.</p>
       </div>
 
       <div className="settings-content">
@@ -21,11 +32,11 @@ function Settings() {
           </div>
           <div className="settings-field">
             <label>Full name</label>
-            <input type="text" defaultValue="Hamza Qasim" />
+            <input type="text" defaultValue={user.full_name} />
           </div>
           <div className="settings-field">
             <label>Email</label>
-            <input type="email" defaultValue="hamza@example.com" />
+            <input type="email" defaultValue={user.email} />
           </div>
           <button className="settings-save">Save changes</button>
         </div>

@@ -31,7 +31,12 @@ def fetch_instagram_profile(username: str) -> dict:
         "username_or_url": username
     }
 
-    response = requests.post(RAPIDAPI_URL, headers=headers, data=payload)
+    try:
+        response = requests.post(RAPIDAPI_URL, headers=headers, data=payload, timeout=20)
+    except requests.exceptions.Timeout:
+        raise Exception("Instagram API took too long to respond (over 20s). Try again — this is usually a temporary network hiccup, not a broken account.")
+    except requests.exceptions.RequestException as e:
+        raise Exception(f"Could not reach Instagram API: {e}")
 
     if response.status_code != 200:
         raise Exception(f"Instagram API failed with status {response.status_code}")
@@ -44,6 +49,7 @@ def fetch_instagram_profile(username: str) -> dict:
         "following":         data.get("following_count", 0),
         "posts":             data.get("media_count", 0),
         "has_profile_pic":   bool(data.get("profile_pic_url")),
+        "profile_pic_url":   data.get("profile_pic_url", "") or "",
         "bio_length":        len(data.get("biography", "") or ""),
         "biography":         data.get("biography", "") or "",
         "has_external_url":  bool(data.get("external_url")),
@@ -74,7 +80,12 @@ def fetch_engagement_data(username: str, amount: int = 12) -> dict:
         "amount": amount
     }
 
-    response = requests.post(POSTS_URL, headers=headers, data=payload)
+    try:
+        response = requests.post(POSTS_URL, headers=headers, data=payload, timeout=20)
+    except requests.exceptions.Timeout:
+        raise Exception("Instagram posts API took too long to respond (over 20s). Try again — usually a temporary network hiccup.")
+    except requests.exceptions.RequestException as e:
+        raise Exception(f"Could not reach Instagram posts API: {e}")
 
     if response.status_code != 200:
         raise Exception(f"Posts fetch failed with status {response.status_code}")
@@ -85,6 +96,7 @@ def fetch_engagement_data(username: str, amount: int = 12) -> dict:
     likes = []
     comments = []
     post_codes = []
+    post_captions = []
 
     for edge in edges:
         node = edge.get("node", edge)
@@ -94,6 +106,11 @@ def fetch_engagement_data(username: str, amount: int = 12) -> dict:
         if code:
             post_codes.append(code)
 
+        caption_obj = node.get("caption")
+        caption_text = (caption_obj or {}).get("text", "") if caption_obj else ""
+        if caption_text and caption_text.strip():
+            post_captions.append(caption_text.strip())
+
     avg_likes = sum(likes) / len(likes) if likes else 0
     avg_comments = sum(comments) / len(comments) if comments else 0
 
@@ -101,7 +118,8 @@ def fetch_engagement_data(username: str, amount: int = 12) -> dict:
         "avg_likes": round(avg_likes, 1),
         "avg_comments": round(avg_comments, 1),
         "posts_analyzed": len(likes),
-        "post_codes": post_codes
+        "post_codes": post_codes,
+        "post_captions": post_captions
     }
 
 
@@ -122,7 +140,10 @@ def fetch_post_comments(media_code: str, sort_order: str = "popular") -> list:
         "sort_order": sort_order
     }
 
-    response = requests.get(COMMENTS_URL, headers=headers, params=params)
+    try:
+        response = requests.get(COMMENTS_URL, headers=headers, params=params, timeout=15)
+    except requests.exceptions.RequestException:
+        return []
 
     if response.status_code != 200:
         return []

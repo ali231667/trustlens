@@ -1,45 +1,33 @@
 .settings-page {
+  position: relative;
   min-height: 100vh;
+  overflow: hidden;
 }
 
 .settings-hero {
   position: relative;
-  padding: 70px 24px 50px;
+  z-index: 1;
+  padding: 50px 24px 40px;
   text-align: center;
-  overflow: hidden;
-}
-
-.settings-hero-shape {
-  position: absolute;
-  top: -140px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 420px;
-  height: 420px;
-  border-radius: 50%;
-  border: 50px solid var(--color-structure);
-  opacity: 0.06;
-}
-
-.settings-eyebrow {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  letter-spacing: 2px;
-  color: var(--color-accent);
-  font-weight: 600;
-  margin-bottom: 14px;
-  position: relative;
 }
 
 .settings-title {
   font-size: 34px;
-  font-weight: 600;
+  font-weight: 700;
   color: var(--color-text);
   letter-spacing: -1px;
-  position: relative;
+  margin-top: 16px;
+}
+
+.settings-lede {
+  margin-top: 12px;
+  color: var(--color-text-muted);
+  font-size: 14px;
 }
 
 .settings-content {
+  position: relative;
+  z-index: 1;
   max-width: 640px;
   margin: 0 auto;
   padding: 0 24px 100px;
@@ -50,13 +38,18 @@
 
 .settings-card {
   background: var(--color-surface);
+  border: 1px solid var(--color-border);
   border-radius: 12px;
   padding: 32px;
-  box-shadow: 0 4px 20px rgba(26, 26, 46, 0.06);
+  transition: border-color 0.2s ease;
+}
+
+.settings-card:hover {
+  border-color: var(--color-accent);
 }
 
 .card-danger {
-  border: 1px solid #F3D2CC;
+  border: 1px solid rgba(255, 107, 91, 0.3);
 }
 
 .settings-card-header {
@@ -74,9 +67,9 @@
   margin-bottom: 10px;
 }
 
-.tag-green { background: #E4F5F0; color: #0E9C7A; }
-.tag-amber { background: #FBF0DD; color: #B8791F; }
-.tag-red { background: #FBE7E4; color: #D14D3D; }
+.tag-green { background: rgba(46, 217, 168, 0.14); color: #2ED9A8; }
+.tag-amber { background: rgba(242, 184, 77, 0.14); color: #F2B84D; }
+.tag-red { background: rgba(255, 107, 91, 0.14); color: #FF6B5B; }
 
 .settings-card-header h2 {
   font-size: 19px;
@@ -98,8 +91,9 @@
 }
 
 .settings-field input {
-  border: 1px solid #E4E7EC;
-  border-radius: 6px;
+  background: var(--color-surface-glass);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
   padding: 12px 14px;
   font-size: 15px;
   font-family: var(--font-display);
@@ -112,13 +106,13 @@
 }
 
 .settings-save {
-  background-color: var(--color-text);
-  color: var(--color-bg);
+  background-color: var(--color-accent);
+  color: #04140F;
   border: none;
-  border-radius: 6px;
+  border-radius: 8px;
   padding: 12px 22px;
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 700;
   font-family: var(--font-display);
   cursor: pointer;
   margin-top: 4px;
@@ -132,13 +126,13 @@
 }
 
 .settings-delete {
-  background-color: #D14D3D;
-  color: white;
+  background-color: var(--color-danger);
+  color: #1A0503;
   border: none;
-  border-radius: 6px;
+  border-radius: 8px;
   padding: 12px 22px;
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 700;
   font-family: var(--font-display);
   cursor: pointer;
 }

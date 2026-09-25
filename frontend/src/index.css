@@ -1,12 +1,15 @@
 :root {
-  --color-bg: #F7F8FA;
-  --color-surface: #FFFFFF;
-  --color-text: #1A1A2E;
-  --color-text-muted: #5C6478;
+  --color-bg: #070A09;
+  --color-surface: #101513;
+  --color-surface-glass: rgba(255, 255, 255, 0.04);
+  --color-border: rgba(255, 255, 255, 0.09);
+  --color-text: #F1F4F2;
+  --color-text-muted: #A6B1AB;
   --color-accent: #00D4AA;
-  --color-structure: #3D4759;
-  --color-warning: #E8A93B;
-  --color-danger: #E85D4D;
+  --color-accent-dim: rgba(0, 212, 170, 0.14);
+  --color-structure: #2A302D;
+  --color-warning: #F2B84D;
+  --color-danger: #FF6B5B;
 
   --font-display: 'Sora', sans-serif;
   --font-mono: 'JetBrains Mono', monospace;
@@ -22,4 +25,75 @@ body {
   background-color: var(--color-bg);
   color: var(--color-text);
   font-family: var(--font-display);
+}
+
+/* ---- Shared dark design-system helpers, used across every page ---- */
+.glow-backdrop {
+  position: absolute;
+  top: -260px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 900px;
+  height: 560px;
+  background: radial-gradient(ellipse, rgba(0, 212, 170, 0.16), transparent 70%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.glass-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+}
+
+.eyebrow-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--color-surface-glass);
+  border: 1px solid var(--color-border);
+  border-radius: 20px;
+  padding: 8px 16px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.eyebrow-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  box-shadow: 0 0 8px rgba(0, 212, 170, 0.9);
+}
+
+/* ---- Micro-interactions, applied globally so every button/card feels alive ---- */
+button {
+  transition: transform 0.12s ease, filter 0.12s ease, opacity 0.12s ease;
+}
+
+button:not(:disabled):hover {
+  filter: brightness(1.1);
+}
+
+button:not(:disabled):active {
+  transform: scale(0.96);
+}
+
+a {
+  transition: color 0.15s ease, opacity 0.15s ease;
+}
+
+.stagger-item {
+  opacity: 0;
+  animation: stagger-fade-in 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes stagger-fade-in {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.count-up {
+  display: inline-block;
 }
