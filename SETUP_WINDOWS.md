@@ -41,7 +41,10 @@ node --version
 cd D:\
 git clone https://github.com/ali231667/trustlens.git
 cd D:\trustlens
+git checkout claude/bold-goldberg-z5ll88
 ```
+
+- The last line switches to the branch that has `backend\requirements.txt` and this guide. After these files are merged into `main`, you can skip it.
 
 Then in VS Code: **File → Open Folder… → `D:\trustlens`**.
 
