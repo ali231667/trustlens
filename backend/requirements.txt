@@ -1,0 +1,42 @@
+# Everything the TrustLens backend needs: the website API (main.py), the
+# browser-extension services (browser_extension/gateway) and the offline
+# graph analysis (fake_follower_graph). Install into the backend venv with:
+#
+#   pip install -r requirements.txt
+#
+# Tested together on Python 3.11: backend tests (46) and gateway tests (57) pass.
+
+# Web server + API
+fastapi>=0.110
+uvicorn[standard]>=0.29
+pydantic>=2.6
+httpx>=0.27
+requests>=2.31
+python-dotenv>=1.0
+
+# Database + login
+SQLAlchemy>=2.0
+bcrypt>=4.1
+PyJWT>=2.8
+
+# Fake-follower Random Forest. Pinned exactly: fake_follower_model.pkl was
+# saved with scikit-learn 1.9.0, and a different version may refuse to load it.
+scikit-learn==1.9.0
+pandas>=2.0
+numpy>=1.26
+
+# Misinformation classifier (XLM-RoBERTa). The model was saved with
+# transformers 5.x.
+torch>=2.2
+transformers>=5.0
+
+# Browser extension: reel audio -> text
+faster-whisper>=1.1
+
+# Offline graph-theory fake-follower analysis + its picture
+networkx>=3.2
+scipy>=1.11
+matplotlib>=3.8
+
+# Tests
+pytest>=8.0
