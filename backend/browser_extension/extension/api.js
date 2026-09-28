@@ -1,86 +1,83 @@
 /*
- * api.js: talks to the TrustLens gateway. The only network code in the
- * extension, and it only ever calls 127.0.0.1:8100.
+ * api.js: talks to the TrustLens gateway, and only to the gateway.
  *
- * Nothing is sent anywhere else: no analytics, no third-party host. The Gemini
- * call happens on the gateway, so no API key is ever present in this codebase.
+ * Requests are relayed through the extension's background worker (see
+ * background.js for why). Nothing is sent anywhere else: no analytics, no
+ * third-party host, and no API key ever exists in the extension's code.
  */
 window.TL = window.TL || {};
 
 TL.api = (function () {
   "use strict";
 
-  async function post(path, body, timeoutMs = 120000) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      const res = await fetch(TL.GATEWAY + path, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
-      if (!res.ok) {
-        let detail = `HTTP ${res.status}`;
-        try {
-          const j = await res.json();
-          if (j && j.detail) detail = j.detail;
-        } catch (e) { /* keep the status line */ }
-        throw new Error(detail);
+  function relay(request) {
+    return new Promise((resolve, reject) => {
+      try {
+        chrome.runtime.sendMessage({ type: "TL_API", request }, (reply) => {
+          const lastError = chrome.runtime.lastError;
+          if (lastError || !reply) {
+            reject(new Error(
+              "TrustLens was updated or restarted. Refresh this Instagram tab (F5)."
+            ));
+            return;
+          }
+          if (!reply.ok) {
+            const err = new Error(reply.error || "Request failed");
+            err.status = reply.status;
+            reject(err);
+            return;
+          }
+          resolve(reply.data);
+        });
+      } catch (e) {
+        // "Extension context invalidated": the extension was reloaded while
+        // this tab kept running the old copy of this script.
+        reject(new Error("TrustLens was updated. Refresh this Instagram tab (F5)."));
       }
-      return await res.json();
-    } catch (err) {
-      if (err.name === "AbortError") {
-        throw new Error("The gateway took too long to answer.");
-      }
-      // A refused connection is the common case (gateway not started) and
-      // deserves an instruction, not a stack trace.
-      if (err instanceof TypeError) {
-        throw new Error(
-          "Can't reach TrustLens. Start the gateway:  uvicorn main:app --port 8100"
-        );
-      }
-      throw err;
-    } finally {
-      clearTimeout(timer);
-    }
+    });
   }
 
   /**
-   * Analyse one post.
-   * `transcribe` is opt-in per call because Whisper on a CPU runs at about
-   * realtime, a 60-second reel is a 60-second wait, which must never happen
-   * unasked while someone is scrolling.
+   * Analyse one post. `transcribe` asks the gateway to listen to a reel's
+   * audio (a few seconds on this machine for a short reel).
    */
   async function analyze(payload, { transcribe = false } = {}) {
-    const timeout = transcribe ? 900000 : 90000;
-    return post("/analyze", { ...payload, transcribe }, timeout);
+    return relay({
+      path: "/analyze",
+      method: "POST",
+      body: { ...payload, transcribe },
+      timeoutMs: transcribe ? 300000 : 90000,
+    });
+  }
+
+  /** Hand the next reels to the gateway so it can check them in advance. */
+  async function prefetch(items, { listen = true } = {}) {
+    try {
+      return await relay({ path: "/prefetch", method: "POST", body: { items, listen }, timeoutMs: 10000 });
+    } catch (e) {
+      return null;   // a missed pre-check only costs speed, never correctness
+    }
   }
 
   async function explain(verdict) {
-    return post("/explain", { verdict }, 60000);
+    return relay({ path: "/explain", method: "POST", body: { verdict }, timeoutMs: 60000 });
   }
 
-  /** How far a running transcription has got. Never throws, the caller is a
-   *  progress ticker and a hiccup there must not disturb the analysis. */
+  /** How far a running transcription has got. Never throws. */
   async function progress(pageUrl) {
     try {
-      const res = await fetch(
-        `${TL.GATEWAY}/progress?page_url=${encodeURIComponent(pageUrl)}`,
-        { cache: "no-store" }
-      );
-      if (!res.ok) return null;
-      return await res.json();
+      return await relay({
+        path: `/progress?page_url=${encodeURIComponent(pageUrl)}`,
+        timeoutMs: 5000,
+      });
     } catch (e) {
       return null;
     }
   }
 
   async function health() {
-    const res = await fetch(TL.GATEWAY + "/health");
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return res.json();
+    return relay({ path: "/health", timeoutMs: 5000 });
   }
 
-  return { analyze, explain, health, progress };
+  return { analyze, explain, health, progress, prefetch };
 })();

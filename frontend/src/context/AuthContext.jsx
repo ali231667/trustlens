@@ -6,6 +6,10 @@ const AuthContext = createContext(null)
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
+  // True after the user presses "Log out" on purpose (until they next log
+  // in). Members-only pages use it to send them home rather than to the
+  // login screen: logging out of Settings shouldn't ask you to log back in.
+  const [signedOut, setSignedOut] = useState(false)
 
   useEffect(() => {
     const token = localStorage.getItem('trustlens_token')
@@ -21,6 +25,7 @@ export function AuthProvider({ children }) {
 
   function _completeLogin(token, user) {
     localStorage.setItem('trustlens_token', token)
+    setSignedOut(false)
     setUser(user)
   }
 
@@ -52,11 +57,18 @@ export function AuthProvider({ children }) {
 
   function logout() {
     localStorage.removeItem('trustlens_token')
+    setSignedOut(true)
     setUser(null)
   }
 
+  // After Settings changes the name, the navbar should show it straight
+  // away without a reload. Only fields the server returned are applied.
+  function applyUserUpdate(updated) {
+    setUser((prev) => (prev ? { ...prev, ...updated } : prev))
+  }
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, signup, verifyCode, logout }}>
+    <AuthContext.Provider value={{ user, loading, signedOut, login, signup, verifyCode, logout, applyUserUpdate }}>
       {children}
     </AuthContext.Provider>
   )

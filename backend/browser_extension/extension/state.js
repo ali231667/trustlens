@@ -15,9 +15,9 @@ TL.GATEWAY = "http://127.0.0.1:8100";
 
 TL.settings = {
   enabled: true,
-  // Whisper transcription is ~realtime on CPU, so it never runs automatically
-  // while scrolling. The user asks for it per-reel with a button.
-  autoTranscribe: false,
+  // Listen to a reel's audio once you've stopped on it (never while you're
+  // swiping past). A short reel takes a few seconds; switch off in the popup.
+  autoTranscribe: true,
   // Analyse posts as they scroll into view.
   autoScan: true,
 };

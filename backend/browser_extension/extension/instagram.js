@@ -54,9 +54,11 @@ TL.ig = (function () {
     }
     const t = pageType();
     if (t === "post" || t === "reel") {
-      // og:url holds the *current* reel's canonical URL and Instagram rewrites it
-      // as you swipe through the /reels/ feed, even when the address bar stays on
-      // "/reels/". Preferring it is what lets each swiped reel get its own badge.
+      // The address bar is the most trustworthy source: Instagram rewrites it
+      // to /reels/<id>/ on every swipe. og:url is only a fallback — it is set
+      // on the first page load and can stay stale while you swipe, which would
+      // give every reel the same identity and so the same badge.
+      if (P.shortcodeFrom(location.href)) return location.href;
       const og = document.querySelector('meta[property="og:url"]');
       if (og && og.content && /\/(reel|reels|p|tv)\//.test(og.content)) {
         return og.content;
@@ -133,21 +135,84 @@ TL.ig = (function () {
     return bits.join("\n").slice(0, 2000);
   }
 
-  /** The username that posted it. */
-  function authorFor(article) {
-    const scope = article || document;
-    const links = Array.from(scope.querySelectorAll('header a[href^="/"], a[href^="/"]'));
-    for (const a of links) {
-      const u = P.usernameFrom(a.getAttribute("href"));
-      if (u) return u;
+  /** The <video> nearest the centre of the viewport, or null. */
+  function inViewVideo() {
+    const mid = window.innerHeight / 2;
+    let best = null;
+    let bestDist = Infinity;
+    for (const v of document.querySelectorAll("video")) {
+      const r = v.getBoundingClientRect();
+      if (r.height < 100) continue;
+      const dist = Math.abs((r.top + r.bottom) / 2 - mid);
+      if (dist < bestDist) { bestDist = dist; best = v; }
     }
-    // Detail pages expose it on the og:title as "user on Instagram: …".
+    return best;
+  }
+
+  /**
+   * The username that posted the post/reel.
+   *
+   * On a feed or profile card the author lives inside that card, so we scan the
+   * card. On a reel or post *detail* page there is no card to scope to, and the
+   * old "first /username/ link on the page" was WRONG: the first such link is the
+   * viewer's own Profile link in the sidebar, so every reel was scored as the
+   * viewer's own account. Instead we find the label sitting over the in-view
+   * video, identified by the one signal that survives Instagram's rotating class
+   * names and any UI language: the author label's text IS the username. The
+   * sidebar link reads "Profile" (text ≠ its username) and avatar links have no
+   * text, so both fall away without hard-coding either.
+   */
+  function authorFor(article) {
+    // Feed / profile card: the author is the first profile link inside the card.
+    if (article) {
+      for (const a of article.querySelectorAll('header a[href^="/"], a[href^="/"]')) {
+        const u = P.usernameFrom(a.getAttribute("href"));
+        if (u) return u;
+      }
+    }
+
+    // Profile page: the pathname names the author.
+    if (pageType() === "profile") return P.usernameFrom(location.pathname);
+
+    // Reel / post detail: the author label over the in-view video. Match the
+    // anchor whose visible text equals its own username, then take the lowest
+    // such label (the author sits at the foot of the reel), which also picks the
+    // right reel when several are stacked in the /reels/ feed.
+    const video = inViewVideo();
+    if (video) {
+      const vr = video.getBoundingClientRect();
+      let best = null;
+      let bestTop = -Infinity;
+      for (const a of document.querySelectorAll('a[href^="/"]')) {
+        const u = P.usernameFrom(a.getAttribute("href"));
+        if (!u) continue;
+        const label = (a.textContent || "").trim();
+        if (label !== u && label.split(/\s+/)[0] !== u) continue;  // label is its own name
+        const r = a.getBoundingClientRect();
+        if (r.width === 0 && r.height === 0) continue;
+        if (r.bottom <= vr.top || r.top >= vr.bottom) continue;    // must overlap the video
+        if (r.top > bestTop) { bestTop = r.top; best = u; }
+      }
+      if (best) return best;
+    }
+
+    // Photo post pages have no video to anchor to. Use the first link whose
+    // visible text is its own username, the same rule as above, which still
+    // skips the sidebar's "Profile" link (its text isn't a username).
+    if (pageType() === "post" || pageType() === "reel") {
+      for (const a of document.querySelectorAll('main a[href^="/"], header a[href^="/"]')) {
+        const u = P.usernameFrom(a.getAttribute("href"));
+        if (u && (a.textContent || "").trim() === u) return u;
+      }
+    }
+
+    // Permalink pages (/reel/XXX/, /p/XXX/) expose it on og:title as
+    // "user on Instagram: …" even when no video geometry is available.
     const ogt = document.querySelector('meta[property="og:title"]');
     if (ogt && ogt.content) {
       const m = ogt.content.match(/^([A-Za-z0-9._]{1,30})\s+on Instagram/);
       if (m) return m[1];
     }
-    if (pageType() === "profile") return P.usernameFrom(location.pathname);
     return null;
   }
 

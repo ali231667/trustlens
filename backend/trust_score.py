@@ -24,6 +24,22 @@ BASE_WEIGHTS = {
 }
 
 
+def verdict_for(score):
+    """The verdict tiers, in one place. Used by live scans below and by the
+    admin panel when an upheld dispute sets a corrected score — both must
+    land on exactly the same boundaries, or a corrected 69.5 could be called
+    "Trusted" in one place and "Moderate Risk" in another. The landing
+    page's score key (frontend Landing.jsx, SCORE_BANDS) mirrors these."""
+    if score >= 70:
+        return ("Trusted", "green", "✅",
+                "This account appears authentic and credible")
+    if score >= 40:
+        return ("Moderate Risk", "yellow", "🟡",
+                "Some suspicious signals detected — verify before trusting")
+    return ("High Risk", "red", "🔴",
+            "Multiple fraud signals detected - do not trust this account")
+
+
 def calculate_trust_score(bot_percentage, engagement_score, misinfo_result=None, credential_result=None):
 
     # ---- Convert bot percentage to a 0-100 score ----
@@ -47,7 +63,11 @@ def calculate_trust_score(bot_percentage, engagement_score, misinfo_result=None,
     credential_applicable = credential_score is not None
 
     # ---- Which modules are in play for this specific scan ----
-    scores = {"fake_follower": fake_follower_score, "engagement": engagement_score}
+    # Engagement is None when no posts could be read — left out rather than
+    # scored as zero, the same rule misinformation follows with no text.
+    scores = {"fake_follower": fake_follower_score}
+    if engagement_score is not None:
+        scores["engagement"] = engagement_score
     if misinfo_applicable:
         scores["misinformation"] = misinfo_score
     if credential_applicable:
@@ -73,28 +93,15 @@ def calculate_trust_score(bot_percentage, engagement_score, misinfo_result=None,
     weighted_score = sum(scores[m] * (BASE_WEIGHTS[m] / total_base_weight) for m in scores)
     final_score = round(weighted_score, 1)
 
-    # ---- Kill Switch: severe bot cluster ----
-    # If bot percentage is extremely high, override score
+    # ---- Kill Switch: the account itself looks fake ----
+    # bot_percentage is the fake-account model's probability that THIS
+    # account is a fake/spam account (not a share of its followers). At 85%+
+    # nothing else about it can be trusted, so the score is capped.
     if bot_percentage >= 85:
         final_score = max(final_score, 0)
         final_score = min(final_score, 15)
 
-    # ---- Verdict ----
-    if final_score >= 70:
-        verdict      = "Trusted"
-        color        = "green"
-        emoji        = "✅"
-        description  = "This account appears authentic and credible"
-    elif final_score >= 40:
-        verdict      = "Moderate Risk"
-        color        = "yellow"
-        emoji        = "🟡"
-        description  = "Some suspicious signals detected — verify before trusting"
-    else:
-        verdict      = "High Risk"
-        color        = "red"
-        emoji        = "🔴"
-        description  = "Multiple fraud signals detected - do not trust this account"
+    verdict, color, emoji, description = verdict_for(final_score)
 
     return {
            "trust_score": final_score,

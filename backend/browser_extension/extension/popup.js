@@ -26,7 +26,7 @@ async function refresh() {
     setDot("gateway", true, "up");
 
     const modules = data.modules || {};
-    for (const key of ["classifier", "account_model", "transcriber"]) {
+    for (const key of ["classifier", "account_model", "instagram_data", "transcriber"]) {
       const m = modules[key] || {};
       setDot(key, !!m.up, m.up ? "up" : "down");
     }
@@ -46,10 +46,10 @@ async function refresh() {
     }
   } catch (err) {
     setDot("gateway", false, "down");
-    ["classifier", "account_model", "transcriber", "gemini"]
+    ["classifier", "account_model", "instagram_data", "transcriber", "gemini"]
       .forEach((k) => setDot(k, false, "—"));
     document.getElementById("hint").textContent =
-      "Gateway not running. Start it, then press Re-check.";
+      "Services not running. Run start_all.ps1, then press Re-check.";
   }
 
   try {
@@ -59,21 +59,28 @@ async function refresh() {
 
 async function loadSettings() {
   const { settings } = await chrome.storage.local.get("settings");
-  const s = settings || { enabled: true, autoScan: true };
+  const s = settings || {};
   document.getElementById("enabled").checked = s.enabled !== false;
   document.getElementById("autoScan").checked = s.autoScan !== false;
+  document.getElementById("autoTranscribe").checked = s.autoTranscribe !== false;
 }
 
 async function saveSettings() {
-  const settings = {
-    enabled: document.getElementById("enabled").checked,
-    autoScan: document.getElementById("autoScan").checked,
-  };
-  await chrome.storage.local.set({ settings });
+  // Merge, so a setting this popup doesn't show is never silently dropped.
+  const { settings } = await chrome.storage.local.get("settings");
+  await chrome.storage.local.set({
+    settings: {
+      ...(settings || {}),
+      enabled: document.getElementById("enabled").checked,
+      autoScan: document.getElementById("autoScan").checked,
+      autoTranscribe: document.getElementById("autoTranscribe").checked,
+    },
+  });
 }
 
 document.getElementById("enabled").addEventListener("change", saveSettings);
 document.getElementById("autoScan").addEventListener("change", saveSettings);
+document.getElementById("autoTranscribe").addEventListener("change", saveSettings);
 
 document.getElementById("refresh").addEventListener("click", refresh);
 

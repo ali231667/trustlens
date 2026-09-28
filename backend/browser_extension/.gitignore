@@ -22,3 +22,7 @@ venv/
 *.swp
 Thumbs.db
 desktop.ini
+
+# Downloaded Whisper model (~480 MB) and temporary reel downloads
+gateway/models/
+gateway/.tmp/

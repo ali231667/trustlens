@@ -39,7 +39,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from red_flags import detect_red_flags, flag_pressure
 
 # Import the site's own classifier in place rather than copying it, so a
 # retrain over there is picked up here with no drift between the two.
@@ -58,8 +57,13 @@ def _find_backend_dir() -> Path:
 
 BACKEND_DIR = _find_backend_dir()
 _CLASSIFIER_DIR = BACKEND_DIR / "misinfo_classifier" / "api"
-if str(_CLASSIFIER_DIR) not in sys.path:
-    sys.path.insert(0, str(_CLASSIFIER_DIR))
+for _p in (str(BACKEND_DIR), str(_CLASSIFIER_DIR)):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
+# The red-flag rules live in backend/red_flags.py, shared with the website's
+# own scoring, so the extension and the site apply the exact same rules.
+from red_flags import detect_red_flags, flag_pressure  # noqa: E402
 
 _IMPORT_ERROR: str | None = None
 try:
@@ -122,12 +126,14 @@ def check_text(req: TextRequest):
     classifier_risk = 0
     low_margin = False
     classifier_error = None
+    model_result = None
 
     if _IMPORT_ERROR:
         classifier_error = _IMPORT_ERROR
     elif text:
         result = classify_text(text)
         if result.get("status") == "success":
+            model_result = result
             category = result.get("primary_category", "credible")
             category_label = category.replace("_", " ").title()
             confidence = float(result.get("confidence") or 0.0)
@@ -158,6 +164,9 @@ def check_text(req: TextRequest):
         "classifier_available": classifier_error is None and bool(text),
         "classifier_error": classifier_error,
         "classifier_risk_score": classifier_risk,
+        # The classifier's own output, unchanged, so the gateway can apply the
+        # website's misinfo_assessment.py rules to it exactly as the site does.
+        "model_result": model_result,
         "flag_pressure": pressure,
         "fact_check_performed": False,
         "fact_check_note": (

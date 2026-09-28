@@ -4,6 +4,10 @@ __pycache__/
 .env
 *.pkl
 backend/trustlens.db
+# Copies of the database (e.g. taken before a schema change) hold real user
+# emails and password hashes, exactly like the live one.
+backend/trustlens.db.*
+backend/*.db-journal
 !backend/fake_follower_model.pkl
 node_modules/
 .DS_Store

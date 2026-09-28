@@ -59,6 +59,53 @@ def _worst(*levels: str) -> str:
     return max(levels, key=lambda lv: LEVEL_ORDER.index(lv if lv in LEVEL_ORDER else "unknown"))
 
 
+# Each level owns a slice of the 0-100 dial. The score is placed *inside* its
+# level's band, so the number the ring shows can never disagree with the colour.
+_SCORE_BANDS = {
+    "danger":  (5, 22),
+    "warning": (26, 45),
+    "caution": (50, 68),
+    "clean":   (82, 96),
+}
+
+
+def _trust_score(level: str, flags: list[dict], account: dict) -> int | None:
+    """A 0-100 trust score for the badge ring, or None when nothing was checked.
+
+    'unknown' means we did not actually read the thing, so it has no score:
+    printing a number there would invent confidence we have not earned, which is
+    the same false-reassurance trap the rest of this file exists to avoid. For
+    every real level, more evidence against the post pushes the score toward the
+    low end of that level's band.
+    """
+    if level not in _SCORE_BANDS:
+        return None
+    lo, hi = _SCORE_BANDS[level]
+
+    pressure = sum(_SEVERITY_WEIGHT.get(f.get("severity", "low"), 1) for f in flags)
+    severity = min(pressure, 8) / 8 * 0.7
+    if account.get("available") and account.get("prob_fake") is not None:
+        severity += float(account["prob_fake"]) * 0.3
+    severity = max(0.0, min(1.0, severity))
+
+    return int(round(hi - severity * (hi - lo)))
+
+
+def _score_label(score: int | None) -> str:
+    """One short word for the score, shown under the ring."""
+    if score is None:
+        return "Not scored"
+    if score >= 80:
+        return "Trusted"
+    if score >= 60:
+        return "Mostly clear"
+    if score >= 40:
+        return "Caution"
+    if score >= 20:
+        return "Risky"
+    return "High risk"
+
+
 def build_verdict(classification: dict, account: dict, transcript: dict,
                   text_used: str, text_sources: list[str],
                   is_reel: bool = False) -> dict:
@@ -193,11 +240,17 @@ def build_verdict(classification: dict, account: dict, transcript: dict,
     # Transcript quality, affects how much the content signal is worth
     # ------------------------------------------------------------------ #
     if transcript:
-        if transcript.get("available"):
+        if transcript.get("available") and transcript.get("no_speech"):
+            # Listened, and nobody talks (music, silence, or no audio track).
+            # That is a real result, not a gap: there is no spoken pitch to miss.
+            reasons.append("The audio was checked: no speech in it (music or silence)."
+                           if not transcript.get("no_audio")
+                           else "This video has no audio track, so there is nothing spoken to check.")
+        elif transcript.get("available"):
             if not transcript.get("is_reliable", False):
                 not_checked.append(
-                    "Spoken audio was transcribed but the audio was unclear, "
-                    "so the text may be wrong."
+                    "The speech in this video was unclear (music or noise), so what "
+                    "was heard is shown but not used to judge the post."
                 )
             evidence.append({
                 "kind": "transcript",
@@ -232,7 +285,10 @@ def build_verdict(classification: dict, account: dict, transcript: dict,
     # Only the *reassuring* direction is downgraded. If flags already fired, the
     # evidence is real and the warning stands, hearing the audio could only make
     # it worse, never better.
-    speech_read = "speech" in (text_sources or [])
+    # "Read" means the audio was actually checked — including a check that
+    # found no speech at all, which is a finding, not a gap.
+    speech_read = "speech" in (text_sources or []) or bool(
+        transcript and transcript.get("available"))
     if is_reel and not speech_read and level in ("clean", "unknown"):
         level = "unknown"
         partial_reel = True
@@ -269,8 +325,12 @@ def build_verdict(classification: dict, account: dict, transcript: dict,
             f"ordinary captions."
         )
 
+    score = _trust_score(level, flags, account)
+
     return {
         "level": level,
+        "score": score,
+        "score_label": _score_label(score),
         "headline": headline,
         "reasons": reasons[:8],
         "notes": notes,

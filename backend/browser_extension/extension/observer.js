@@ -136,6 +136,10 @@ TL.observer = (function () {
 
     shownKey = data.key;
     const el = ensureBadge();
+    // The badge is shared by every post; tag it with the one it now describes
+    // so a slow answer for a reel you already swiped past can't be painted
+    // over this one (see TL.analyzePost).
+    el.dataset.tlKey = data.key;
     if (!TL.settings.autoScan) return;
 
     // Analyse the post you SETTLE on, not every one that flies past mid-scroll.
@@ -206,9 +210,16 @@ TL.observer = (function () {
     // right moment, leaving a blank page with no badge and no explanation. This
     // cheap re-check (one call, no network unless the post actually changed)
     // guarantees the badge turns up within a couple of seconds regardless.
+    //
+    // It also watches the address bar. The pushState patch above only catches
+    // calls made from this content script's own isolated world; Instagram's
+    // code runs in the page's world and calls the page's unpatched history, so
+    // swiping from one reel to the next only changes the URL. Checking it here
+    // is what guarantees every swiped reel gets its own verdict.
     heartbeat = setInterval(() => {
+      if (location.href !== lastUrl) { checkUrlChange(); update(); return; }
       if (!badge || !badge.isConnected || shownKey === null) update();
-    }, 2000);
+    }, 700);
 
     update();
     TL.log("observer started on", TL.ig.pageType(), location.href);
@@ -223,5 +234,7 @@ TL.observer = (function () {
     removeBadge();
   }
 
-  return { start, stop, scanNow };
+  function currentKey() { return shownKey; }
+
+  return { start, stop, scanNow, currentKey };
 })();

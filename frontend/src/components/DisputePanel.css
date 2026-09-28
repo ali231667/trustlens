@@ -1,0 +1,11 @@
+.dp { display: grid; gap: 16px; justify-items: start; }
+.dp > .tl-field { width: 100%; }
+.dp-invite { box-shadow: 8px 8px 0 var(--pink); }
+.dp-title { font-size: clamp(26px, 3vw, 36px); font-weight: 800; letter-spacing: -0.03em; line-height: 1.05; }
+.dp-muted { color: var(--ink-soft); font-size: 15px; }
+.dp-count { font-size: 13px; color: var(--ink-mute); }
+.dp-count.is-ok { color: var(--ok-ink); }
+.dp-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.dp-tone-ok { color: var(--ok-ink); }
+.dp-tone-warn { color: var(--warn-ink); }
+.dp-tone-bad { color: var(--bad-ink); }

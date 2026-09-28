@@ -13,18 +13,20 @@ from model_loader import classify_text
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from fake_follower import analyze_fake_followers
+from fake_follower import analyze_fake_followers, name_features
+from misinfo_assessment import assess_text, worst
 from engagement_analyzer import analyze_engagement, analyze_comment_authenticity
 from trust_score import calculate_trust_score
 from data_ingestion import fetch_instagram_profile, fetch_engagement_data, fetch_post_comments
 from credential_extractor import calculate_credential_confidence
-from database import init_db, get_db, ScanHistory, User, VerificationCode
+from database import init_db, get_db, ScanHistory, User, VerificationCode, Appeal
 from auth import (
-    hash_password, verify_password, create_token, get_current_user, get_current_user_optional,
+    hash_password, verify_password, create_token, get_current_user,
     EMAIL_RE, MAX_PASSWORD_BYTES, password_strength_error,
     generate_verification_code, VERIFICATION_CODE_EXPIRES_MINUTES,
 )
 from email_service import send_verification_code, email_configured
+from admin import router as admin_router, APPEAL_SLA_HOURS
 
 app = FastAPI(
     title="TrustLens API",
@@ -37,9 +39,27 @@ app.add_middleware(
     allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
+    # Lets the frontend read the admin CSV export's filename; browsers hide
+    # every non-basic response header from cross-origin JavaScript otherwise.
+    expose_headers=["Content-Disposition"],
 )
 
 init_db()
+
+app.include_router(admin_router)
+
+
+def _user_payload(user: User) -> dict:
+    """What the frontend is told about the logged-in user. `role` is how it
+    knows to show the Admin link — purely cosmetic; every admin endpoint
+    re-checks the role on the server regardless."""
+    return {
+        "id": user.id,
+        "full_name": user.full_name,
+        "email": user.email,
+        "role": user.role or "user",
+    }
+
 
 @app.get("/")
 def home():
@@ -87,9 +107,15 @@ def analyze_profile(data: dict):
 def analyze_profile_live(
     data: dict,
     db: Session = Depends(get_db),
-    current_user: User | None = Depends(get_current_user_optional),
+    # Login required (changed 2026-09-26). A scan used to run for anyone and
+    # was only tied to an account if a token happened to be sent — which is
+    # why logged-out scans never showed on the Dashboard and couldn't be
+    # disputed. The product flow is now "sign up / log in, then scan", and
+    # this is the check that actually enforces it; the frontend redirect is
+    # only presentation and can be skipped by calling the API directly.
+    current_user: User = Depends(get_current_user),
 ):
-    username = data.get("username")
+    username = (data.get("username") or "").strip().lstrip("@")
 
     if not username:
         return {"error": "Please provide a username"}
@@ -114,14 +140,16 @@ def analyze_profile_live(
     fake_result = analyze_fake_followers(
         profile["followers"], profile["following"], profile["posts"],
         profile["has_profile_pic"], profile["bio_length"],
-        profile["has_external_url"], profile["is_private"]
+        profile["has_external_url"], profile["is_private"],
+        **name_features(profile.get("username"), profile.get("full_name")),
     )
 
     engagement_result = analyze_engagement(
         profile["followers"],
         engagement_data["avg_likes"],
         engagement_data["avg_comments"],
-        profile["posts"]
+        profile["posts"],
+        posts_analyzed=engagement_data.get("posts_analyzed"),
     )
 
     # ---- Comment Authenticity Check (uses most recent post) ----
@@ -139,8 +167,11 @@ def analyze_profile_live(
         pass
 
     # ---- Credential Extraction & Confidence Scoring ----
+    # Checked against the PMDC and US NPI doctor registers when the bio claims
+    # to be a doctor; other credentials are reported but not scored.
     credential_result = calculate_credential_confidence(
-        profile.get("biography", ""), profile["is_verified"]
+        profile.get("biography", ""), profile["is_verified"],
+        full_name=profile.get("full_name") or "",
     )
 
     # ---- Misinformation Classification (bio + post captions) ----
@@ -152,10 +183,12 @@ def analyze_profile_live(
     # the Trust Score; every individual result is kept for the Details page.
     misinfo_sources = []
 
+    # Each text goes through assess_text: the AI classifier, cross-checked
+    # against the rule-based red flags (see misinfo_assessment.py for why).
     bio_text = profile.get("biography", "")
     if bio_text and bio_text.strip():
         try:
-            r = classify_text(bio_text)
+            r = assess_text(bio_text, classify_text)
             r["source"] = "bio"
             r["text_preview"] = bio_text[:80]
             misinfo_sources.append(r)
@@ -164,17 +197,15 @@ def analyze_profile_live(
 
     for caption in engagement_data.get("post_captions", []):
         try:
-            r = classify_text(caption)
+            r = assess_text(caption, classify_text)
             r["source"] = "caption"
             r["text_preview"] = caption[:80]
             misinfo_sources.append(r)
         except Exception:
             pass  # one bad caption shouldn't break the whole scan
 
-    successful = [r for r in misinfo_sources if r.get("status") == "success"]
-    if successful:
-        misinfo_result = max(successful, key=lambda r: r["risk_score"])
-    else:
+    misinfo_result = worst(misinfo_sources)
+    if misinfo_result is None:
         misinfo_result = {
             "status": "skipped",
             "message": "No bio or caption text was available to classify",
@@ -206,8 +237,8 @@ def analyze_profile_live(
     # A DB hiccup should never break a scan that already succeeded, so this
     # is best-effort: log it and move on rather than failing the request.
     try:
-        db.add(ScanHistory(
-            user_id=current_user.id if current_user else None,
+        scan = ScanHistory(
+            user_id=current_user.id,
             username=result["username"],
             full_name=result["full_name"],
             is_verified=result["is_verified"],
@@ -219,10 +250,19 @@ def analyze_profile_live(
             engagement_score=engagement_result.get("engagement_score"),
             misinformation_flag=misinfo_result.get("misinformation_flag"),
             raw_result=json.dumps(result),
-        ))
+        )
+        db.add(scan)
         db.commit()
+        db.refresh(scan)
+        # Returned (not stored in raw_result) so the Results page can offer
+        # "Dispute this score" against this exact saved record — which is
+        # only possible when the scan is on the viewer's own account.
+        result["scan_id"] = scan.id
+        result["scan_owned"] = True
     except Exception as e:
         db.rollback()
+        result["scan_id"] = None
+        result["scan_owned"] = False
         print(f"Warning: could not save scan history: {e}")
 
     return result
@@ -313,6 +353,11 @@ def login(data: dict, db: Session = Depends(get_db)):
     if not user or not verify_password(password, user.password_hash):
         raise HTTPException(401, "Incorrect email or password")
 
+    # Only revealed after the password is proven correct, so this can't be
+    # used to probe which emails belong to suspended accounts.
+    if user.is_active is False:
+        raise HTTPException(403, "This account has been suspended. Contact the TrustLens team if you think this is a mistake.")
+
     if not user.email_verified:
         _send_verification_code(db, user)
         return {
@@ -321,8 +366,11 @@ def login(data: dict, db: Session = Depends(get_db)):
             "message": f"This account was never verified. We emailed a new 6-digit code to {user.email}.",
         }
 
+    user.last_login_at = datetime.utcnow()
+    db.commit()
+
     token = create_token(user.id)
-    return {"token": token, "user": {"id": user.id, "full_name": user.full_name, "email": user.email}}
+    return {"token": token, "user": _user_payload(user)}
 
 
 @app.post("/verify-email")
@@ -348,17 +396,21 @@ def verify_email(data: dict, db: Session = Depends(get_db)):
     if not verification_code or verification_code.expires_at < datetime.utcnow():
         raise generic_error
 
+    if user.is_active is False:
+        raise HTTPException(403, "This account has been suspended. Contact the TrustLens team if you think this is a mistake.")
+
     verification_code.used = True
     user.email_verified = True
+    user.last_login_at = datetime.utcnow()
     db.commit()
 
     token = create_token(user.id)
-    return {"token": token, "user": {"id": user.id, "full_name": user.full_name, "email": user.email}}
+    return {"token": token, "user": _user_payload(user)}
 
 
 @app.get("/me")
 def me(current_user: User = Depends(get_current_user)):
-    return {"id": current_user.id, "full_name": current_user.full_name, "email": current_user.email}
+    return _user_payload(current_user)
 
 
 @app.get("/scans")
@@ -375,6 +427,12 @@ def get_scan_history(
         .limit(limit)
         .all()
     )
+
+    appeal_status = {
+        a.scan_id: a.status
+        for a in db.query(Appeal).filter(Appeal.scan_id.in_([s.id for s in scans])).all()
+    } if scans else {}
+
     return [
         {
             "id": s.id,
@@ -388,7 +446,195 @@ def get_scan_history(
             "bot_percentage": s.bot_percentage,
             "engagement_score": s.engagement_score,
             "misinformation_flag": s.misinformation_flag,
+            "corrected_trust_score": s.corrected_trust_score,
+            "corrected_verdict": s.corrected_verdict,
+            "appeal_status": appeal_status.get(s.id),
             "scanned_at": s.scanned_at.isoformat() if s.scanned_at else None,
         }
         for s in scans
+    ]
+
+
+@app.get("/scans/{scan_id}")
+def get_saved_result(
+    scan_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Reopens a past scan's full result exactly as it was saved, so the
+    Dashboard can link back to the Results page without re-running the scan
+    (which would spend RapidAPI quota and might give a different answer if
+    the account has changed since). Only your own scans."""
+    scan = db.query(ScanHistory).filter(ScanHistory.id == scan_id).first()
+    # 404 rather than 403 for someone else's scan: don't confirm it exists.
+    if not scan or scan.user_id != current_user.id:
+        raise HTTPException(404, "Scan not found")
+    try:
+        result = json.loads(scan.raw_result)
+    except (TypeError, ValueError):
+        raise HTTPException(410, "This scan's full result wasn't saved, so it can't be reopened. Run it again.")
+
+    appeal = db.query(Appeal).filter(Appeal.scan_id == scan.id).first()
+    result["scan_id"] = scan.id
+    result["scan_owned"] = True
+    result["scanned_at"] = scan.scanned_at.isoformat() if scan.scanned_at else None
+    # The original score stays exactly what the models said; a correction
+    # from an upheld dispute is reported alongside it, never written over it.
+    result["correction"] = (
+        {"trust_score": scan.corrected_trust_score, "verdict": scan.corrected_verdict}
+        if scan.corrected_trust_score is not None else None
+    )
+    result["appeal_status"] = appeal.status if appeal else None
+    return result
+
+
+# ------------------------------------------------------------------------- #
+# Account settings — real changes, not decorative buttons.
+# ------------------------------------------------------------------------- #
+@app.patch("/me")
+def update_me(
+    data: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Change your display name. Email is deliberately not editable here:
+    changing it would need the new address verified all over again, and a
+    half-built version of that would let anyone attach an unverified email."""
+    full_name = (data.get("full_name") or "").strip()
+    if not full_name:
+        raise HTTPException(400, "Please enter your name")
+    if len(full_name) > 100:
+        raise HTTPException(400, "Name is too long")
+    current_user.full_name = full_name
+    db.commit()
+    return _user_payload(current_user)
+
+
+@app.post("/me/password")
+def change_password(
+    data: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    current_password = data.get("current_password") or ""
+    new_password = data.get("new_password") or ""
+
+    if not verify_password(current_password, current_user.password_hash):
+        raise HTTPException(400, "Your current password is incorrect")
+    if len(new_password.encode("utf-8")) > MAX_PASSWORD_BYTES:
+        raise HTTPException(400, f"Password must be {MAX_PASSWORD_BYTES} characters or fewer")
+    strength_error = password_strength_error(new_password)
+    if strength_error:
+        raise HTTPException(400, strength_error)
+    if new_password == current_password:
+        raise HTTPException(400, "The new password must be different from the current one")
+
+    current_user.password_hash = hash_password(new_password)
+    db.commit()
+    return {"message": "Password updated."}
+
+
+@app.delete("/me")
+def delete_me(
+    data: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Permanently deletes the account and everything tied to it: scans,
+    disputes, verification codes. Asks for the password again so a stolen
+    session token alone can't wipe an account."""
+    if not verify_password(data.get("password") or "", current_user.password_hash):
+        raise HTTPException(400, "Password is incorrect")
+    # Same no-self-lockout rule the admin console uses: an admin account is
+    # tied to the audit trail and dispute decisions, so another admin has to
+    # remove the admin role first.
+    if current_user.role == "admin":
+        raise HTTPException(400, "Admin accounts can't be deleted from here. Ask another admin to remove your admin role first.")
+
+    scan_ids = [s.id for s in db.query(ScanHistory.id).filter(ScanHistory.user_id == current_user.id).all()]
+    db.query(Appeal).filter(Appeal.user_id == current_user.id).delete(synchronize_session=False)
+    if scan_ids:
+        db.query(Appeal).filter(Appeal.scan_id.in_(scan_ids)).delete(synchronize_session=False)
+    db.query(ScanHistory).filter(ScanHistory.user_id == current_user.id).delete(synchronize_session=False)
+    db.query(VerificationCode).filter(VerificationCode.user_id == current_user.id).delete(synchronize_session=False)
+    db.delete(current_user)
+    db.commit()
+    return {"message": "Your account and scan history have been deleted."}
+
+
+# ------------------------------------------------------------------------- #
+# Score disputes — the user side of the appeal mechanism.
+# The admin side (review, uphold/reject) lives in admin.py.
+# ------------------------------------------------------------------------- #
+APPEAL_REASON_MIN = 20
+APPEAL_REASON_MAX = 2000
+
+
+@app.post("/appeals")
+def create_appeal(
+    data: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Dispute a score. One dispute per scan, and only on a scan that
+    belongs to you — otherwise anyone could flood the admin queue with
+    disputes about scans they never ran."""
+    scan_id = data.get("scan_id")
+    reason = (data.get("reason") or "").strip()
+    evidence_url = (data.get("evidence_url") or "").strip() or None
+
+    scan = db.query(ScanHistory).filter(ScanHistory.id == scan_id).first()
+    # 404 rather than 403 for someone else's scan: don't confirm it exists.
+    if not scan or scan.user_id != current_user.id:
+        raise HTTPException(404, "That scan isn't on your account. Scans run while logged out can't be disputed — log in and scan again.")
+
+    if len(reason) < APPEAL_REASON_MIN:
+        raise HTTPException(400, f"Please explain why the score is wrong in at least {APPEAL_REASON_MIN} characters, so a reviewer has something to go on.")
+    if len(reason) > APPEAL_REASON_MAX:
+        raise HTTPException(400, f"Please keep the explanation under {APPEAL_REASON_MAX} characters.")
+    if evidence_url and (not evidence_url.startswith(("http://", "https://")) or len(evidence_url) > 500):
+        raise HTTPException(400, "Evidence must be a link starting with http:// or https://")
+
+    if db.query(Appeal).filter(Appeal.scan_id == scan.id).first():
+        raise HTTPException(409, "This score has already been disputed.")
+
+    appeal = Appeal(scan_id=scan.id, user_id=current_user.id, reason=reason, evidence_url=evidence_url)
+    db.add(appeal)
+    db.commit()
+    db.refresh(appeal)
+
+    return {
+        "id": appeal.id,
+        "status": appeal.status,
+        "message": f"Dispute submitted. A reviewer will look at it within {APPEAL_SLA_HOURS} hours.",
+    }
+
+
+@app.get("/appeals/mine")
+def my_appeals(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    rows = (
+        db.query(Appeal, ScanHistory)
+        .join(ScanHistory, ScanHistory.id == Appeal.scan_id)
+        .filter(Appeal.user_id == current_user.id)
+        .order_by(Appeal.created_at.desc())
+        .all()
+    )
+    return [
+        {
+            "id": a.id,
+            "scan_id": s.id,
+            "username": s.username,
+            "original_score": s.trust_score,
+            "original_verdict": s.verdict,
+            "status": a.status,
+            "reason": a.reason,
+            "admin_note": a.admin_note,
+            "corrected_trust_score": a.corrected_trust_score,
+            "created_at": a.created_at.isoformat() if a.created_at else None,
+            "resolved_at": a.resolved_at.isoformat() if a.resolved_at else None,
+        }
+        for a, s in rows
     ]

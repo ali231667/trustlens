@@ -2,7 +2,46 @@
 # TrustLens — Engagement Analyzer Module
 # ============================================================
 
-def analyze_engagement(followers, likes_avg, comments_avg, posts):
+# Engagement score as a smooth curve of (rate / benchmark), instead of the old
+# 4-step staircase (20 / 50 / 75 / 90). With steps, a Macro account at 0.74%
+# scored 20 and at 0.75% scored 50 — a 0.01% difference moving the final
+# Trust Score by ~8 points. The curve passes through the old step values at
+# the MIDDLE of each old band (ratio 0.25 -> 20, 0.75 -> 50, 1.25 -> 75,
+# 2.0 -> 90), so scores don't shift on average; only the cliffs are gone.
+_CURVE = [(0.0, 5), (0.5, 35), (1.0, 65), (1.5, 85), (2.5, 95)]
+
+
+def _smooth_score(ratio):
+    if ratio >= _CURVE[-1][0]:
+        return float(_CURVE[-1][1])
+    for (x0, y0), (x1, y1) in zip(_CURVE, _CURVE[1:]):
+        if ratio <= x1:
+            return y0 + (y1 - y0) * (ratio - x0) / (x1 - x0)
+    return float(_CURVE[-1][1])
+
+
+def analyze_engagement(followers, likes_avg, comments_avg, posts, posts_analyzed=None):
+
+    # ---- No posts came back: nothing was measured ----
+    # Instagram sometimes returns no posts (a network hiccup, rate limiting,
+    # a private account). That used to average to 0 likes and be scored
+    # "Suspicious" — a real scan of a healthy 22%-engagement account was
+    # dragged to Moderate Risk this way. Missing data is reported as missing,
+    # and the Trust Score leaves this module out, same as Misinformation
+    # when there is no text.
+    if posts_analyzed == 0:
+        return {
+            "engagement_rate": None,
+            "benchmark": None,
+            "tier": None,
+            "status": "Not measured",
+            "color": "gray",
+            "engagement_score": None,
+            "like_comment_ratio": None,
+            "flags": ["No posts could be read for this account, so engagement wasn't measured"],
+            "total_flags": 1,
+            "measured": False,
+        }
 
     # ---- Engagement Rate Calculation ----
     total_interactions = likes_avg + comments_avg
@@ -26,23 +65,18 @@ def analyze_engagement(followers, likes_avg, comments_avg, posts):
     # ---- Like to Comment Ratio ----
     like_comment_ratio = likes_avg / (comments_avg + 1)
 
-    # ---- Engagement Score 0-100 ----
-    if engagement_rate >= benchmark * 1.5:
-        engagement_score = 90
-        status = "Excellent"
-        color = "green"
-    elif engagement_rate >= benchmark:
-        engagement_score = 75
-        status = "Healthy"
-        color = "green"
-    elif engagement_rate >= benchmark * 0.5:
-        engagement_score = 50
-        status = "Below Average"
-        color = "yellow"
+    # ---- Engagement Score 0-100 (smooth) + a readable band ----
+    ratio = engagement_rate / benchmark
+    engagement_score = round(_smooth_score(ratio), 1)
+
+    if ratio >= 1.5:
+        status, color = "Excellent", "green"
+    elif ratio >= 1.0:
+        status, color = "Healthy", "green"
+    elif ratio >= 0.5:
+        status, color = "Below Average", "yellow"
     else:
-        engagement_score = 20
-        status = "Suspicious"
-        color = "red"
+        status, color = "Suspicious", "red"
 
     # ---- Suspicious Pattern Detection ----
     flags = []
@@ -68,7 +102,8 @@ def analyze_engagement(followers, likes_avg, comments_avg, posts):
         "engagement_score":   engagement_score,
         "like_comment_ratio": round(like_comment_ratio, 2),
         "flags":              flags,
-        "total_flags":        len(flags)
+        "total_flags":        len(flags),
+        "measured":           True,
     }
 
 from collections import Counter

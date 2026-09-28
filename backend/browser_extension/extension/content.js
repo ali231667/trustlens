@@ -28,6 +28,63 @@ TL.ui = (function () {
     return node;
   }
 
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  function svgEl(tag, attrs) {
+    const node = document.createElementNS(SVG_NS, tag);
+    for (const k in attrs) node.setAttribute(k, attrs[k]);
+    return node;
+  }
+
+  /**
+   * The score ring: an SVG donut with the 0-100 trust score in the middle.
+   * The arc length is the score, the colour comes from the badge's level class
+   * (see .tl-ring-arc in styles.css), so the number and the colour always agree.
+   * A null score (nothing was checked) shows a full grey track with "?", never a
+   * misleading zero.
+   */
+  function scoreRing(score) {
+    const size = 46, stroke = 5, r = (size - stroke) / 2;
+    const circ = 2 * Math.PI * r;
+    const pct = score == null ? 0 : Math.max(0, Math.min(100, score)) / 100;
+
+    const svg = svgEl("svg", {
+      class: "tl-ring", width: size, height: size,
+      viewBox: `0 0 ${size} ${size}`, role: "img",
+      "aria-label": score == null ? "Not scored" : `Trust score ${score} of 100`,
+    });
+    const cx = size / 2;
+    svg.appendChild(svgEl("circle", {
+      class: "tl-ring-track", cx, cy: cx, r, fill: "none", "stroke-width": stroke,
+    }));
+    if (score != null) {
+      svg.appendChild(svgEl("circle", {
+        class: "tl-ring-arc", cx, cy: cx, r, fill: "none", "stroke-width": stroke,
+        "stroke-linecap": "round",
+        "stroke-dasharray": `${(circ * pct).toFixed(2)} ${circ.toFixed(2)}`,
+        transform: `rotate(-90 ${cx} ${cx})`,
+      }));
+    }
+    const num = svgEl("text", {
+      class: "tl-ring-num", x: cx, y: cx,
+      "text-anchor": "middle", "dominant-baseline": "central",
+    });
+    num.textContent = score == null ? "?" : String(score);
+    svg.appendChild(num);
+    return svg;
+  }
+
+  /** The score ring plus its label, the headline figure of the badge. */
+  function scoreCard(score, label) {
+    const card = el("div", "tl-score");
+    card.appendChild(scoreRing(score));
+    const text = el("div", "tl-score-text");
+    text.appendChild(el("div", "tl-score-label", label || "Checked"));
+    text.appendChild(el("div", "tl-score-sub",
+      score == null ? "Not enough was checked to score" : "Trust score / 100"));
+    card.appendChild(text);
+    return card;
+  }
+
   /** The badge shell, reused for every state so the node identity is stable.
    *
    * Collapsed by default, per the scope document: "a small color-coded trust
@@ -44,6 +101,10 @@ TL.ui = (function () {
     const row = el("div", "tl-row");
     row.appendChild(el("span", "tl-dot"));
     row.appendChild(el("span", "tl-title", "TrustLens is checking this post…"));
+    // Visible even while collapsed: the score, and "Listening… 40%" while the
+    // reel's audio is being checked.
+    row.appendChild(el("span", "tl-row-status"));
+    row.appendChild(el("span", "tl-row-score"));
     row.appendChild(el("span", "tl-chevron", "▾"));
     row.appendChild(el("span", "tl-brand", "TrustLens"));
 
@@ -86,6 +147,26 @@ TL.ui = (function () {
     setLevel(badge, "pending");
     clearBelowRow(badge);
     badge.querySelector(".tl-title").textContent = message;
+    setRowScore(badge, null);
+    setListening(badge, null);
+  }
+
+  function setRowScore(badge, score) {
+    const s = badge.querySelector(".tl-row-score");
+    if (s) s.textContent = score == null ? "" : String(score);
+  }
+
+  /** "Listening… 40%" in the always-visible row, or clear it with null. */
+  function setListening(badge, text) {
+    const s = badge.querySelector(".tl-row-status");
+    if (s) s.textContent = text || "";
+  }
+
+  function fmtCount(n) {
+    if (typeof n !== "number") return "?";
+    if (n >= 1e6) return (n / 1e6).toFixed(n >= 1e7 ? 0 : 1).replace(/\.0$/, "") + "M";
+    if (n >= 1e4) return Math.round(n / 1e3) + "K";
+    return n.toLocaleString("en-US");
   }
 
   /** Live progress line under the title, plus a bar. Reused every tick. */
@@ -139,8 +220,73 @@ TL.ui = (function () {
     clearBelowRow(badge);
 
     const label = LEVEL_LABEL[level] || "Checked";
+    const cov1 = verdict.coverage || {};
     badge.querySelector(".tl-title").textContent =
-      `${label} — ${verdict.headline || ""}`.replace(/\s*—\s*$/, "");
+      (level === "unknown" && (cov1.listening || cov1.can_listen) && !cov1.speech_read)
+        // Not a failure: the account and caption are done, the audio is next.
+        ? (cov1.account_read ? "Account & caption checked, now the audio" : "Caption checked, now the audio")
+        : `${label} — ${verdict.headline || ""}`.replace(/\s*—\s*$/, "");
+
+    setRowScore(badge, verdict.score);
+    setListening(badge, null);
+
+    // The headline figure: the trust score in its ring. `score` is null when
+    // nothing could be checked, and the ring shows "?" rather than a fake number.
+    badge.appendChild(scoreCard(verdict.score, verdict.score_label));
+
+    // Where the number comes from: the website's Trust Score engine, one row
+    // per module that actually ran, with the weight it got for this post.
+    if (Array.isArray(verdict.score_breakdown) && verdict.score_breakdown.length) {
+      const box = el("div", "tl-breakdown");
+      box.appendChild(el("div", "tl-breakdown-head", "How this score was made"));
+      for (const b of verdict.score_breakdown) {
+        const row = el("div", "tl-breakdown-row");
+        row.appendChild(el("span", "tl-breakdown-name", b.label));
+        const bar = el("span", "tl-breakdown-bar");
+        const fill = el("span", "tl-breakdown-fill");
+        fill.style.width = Math.max(2, Math.min(100, b.score)) + "%";
+        fill.className = "tl-breakdown-fill " + (b.score >= 70 ? "is-good" : b.score >= 40 ? "is-mid" : "is-bad");
+        bar.appendChild(fill);
+        row.appendChild(bar);
+        row.appendChild(el("span", "tl-breakdown-num", `${b.score}`));
+        row.appendChild(el("span", "tl-breakdown-weight", `×${Math.round(b.weight)}%`));
+        box.appendChild(row);
+      }
+      badge.appendChild(box);
+    }
+
+    // Who posted it, and what our fake-account model thinks of that account.
+    const post = verdict.post || {};
+    const acct = verdict.account || {};
+    const cov0 = verdict.coverage || {};
+    if (cov0.account_read && typeof acct.prob_fake === "number") {
+      const pctFake = Math.round(acct.prob_fake * 100);
+      const chip = el("div", "tl-account tl-account-" + (acct.level || "unknown"));
+      const head = el("div", "tl-account-head");
+      head.appendChild(el("span", "tl-account-name",
+        "@" + (acct.username || post.author || "account") + (acct.is_verified ? " ✓" : "")));
+      head.appendChild(el("span", "tl-account-pct", pctFake + "% fake-account likelihood"));
+      chip.appendChild(head);
+      chip.appendChild(el("div", "tl-account-band",
+        acct.band === "fake" ? "Profile looks bot-like"
+        : acct.band === "uncertain" ? "Ambiguous: not clearly real or fake"
+        : "Profile looks like a real account"));
+      if (typeof acct.followers === "number") {
+        chip.appendChild(el("div", "tl-account-stats",
+          `${fmtCount(acct.followers)} followers · ${fmtCount(acct.following)} following · ` +
+          `${fmtCount(acct.posts)} posts`));
+      }
+      if (typeof acct.engagement_rate === "number") {
+        chip.appendChild(el("div", "tl-account-stats",
+          `Engagement ${acct.engagement_rate}% over recent posts (${acct.engagement_status})`));
+      }
+      badge.appendChild(chip);
+    }
+    if (typeof post.likes === "number") {
+      const bits = [`${fmtCount(post.likes)} likes`, `${fmtCount(post.comments)} comments`];
+      if (post.caption_source === "instagram") bits.push("caption from Instagram");
+      badge.appendChild(el("div", "tl-meta", bits.join(" · ")));
+    }
 
     // Reasons
     if (verdict.reasons && verdict.reasons.length) {
@@ -168,11 +314,18 @@ TL.ui = (function () {
       box.appendChild(el("div", "tl-transcript-body", tr.text.trim()));
 
       const bits = [];
-      if (tr.language) bits.push("Language: " + String(tr.language).toUpperCase());
-      if (typeof tr.confidence === "number") {
-        bits.push("Confidence: " + Math.round(tr.confidence * 100) + "%");
+      if (tr.language) {
+        bits.push("Language: " + String(tr.language).toUpperCase() +
+          (typeof tr.confidence === "number"
+            ? ` (${Math.round(tr.confidence * 100)}% sure of the language)` : ""));
       }
-      if (tr.is_reliable === false) bits.push("low confidence — read as rough");
+      if (tr.video_seconds && tr.listened_seconds && tr.video_seconds > tr.listened_seconds + 2) {
+        const len = tr.video_seconds >= 120
+          ? Math.round(tr.video_seconds / 60) + "-min" : Math.round(tr.video_seconds) + "s";
+        bits.push(`Heard the first ${Math.round(tr.listened_seconds)}s of a ${len} video`);
+      }
+      if (tr.engine) bits.push("Transcribed by " + tr.engine);
+      if (tr.is_reliable === false) bits.push("unclear audio, so not used for the score");
       if (bits.length) box.appendChild(el("div", "tl-transcript-meta", bits.join(" · ")));
       badge.appendChild(box);
     }
@@ -184,13 +337,13 @@ TL.ui = (function () {
     whyBtn.addEventListener("click", () => onWhy(badge, verdict, whyBtn));
     actions.appendChild(whyBtn);
 
-    // Offer transcription when the post is a reel whose audio was not read yet.
+    // Offer to listen when the audio hasn't been checked yet and there is a
+    // video file to listen to.
     const cov = verdict.coverage || {};
-    const speechRead = cov.speech_read || (verdict.text_sources || []).includes("speech");
-    if (ctx && ctx.isReel && !speechRead) {
+    if (ctx && cov.can_listen && !cov.speech_read) {
       const btn = el("button", "tl-btn tl-btn-primary", "▶ Listen to audio");
-      btn.title = "Download the reel and transcribe what is said, then re-check. " +
-                  "On this machine that takes a few minutes for a one-minute reel.";
+      btn.title = "Transcribe what is said in this reel, then re-check it. " +
+                  "A few seconds for a short reel.";
       btn.addEventListener("click", () => ctx.onTranscribe(btn));
       actions.appendChild(btn);
     }
@@ -229,53 +382,123 @@ TL.ui = (function () {
     }
   }
 
-  return { makeBadge, setPending, setError, setProgress, render };
+  return { makeBadge, setPending, setError, setProgress, setListening, render };
 })();
 
 /* ---------------------------------------------------------------------- *
  * Analysis driver, one post at a time.
  * ---------------------------------------------------------------------- */
-TL.analyzePost = async function (postData, badge, { transcribe = false } = {}) {
-  const cacheKey = postData.key + (transcribe ? ":speech" : "");
+TL.listening = new Set();   // reels whose audio is being listened to right now
 
-  // Re-rendering is constant on Instagram; never redo work already done.
-  const cached = TL.cache.get(cacheKey);
-  if (cached && cached.status === "done") {
-    TL.ui.render(badge, cached.verdict, makeCtx(postData, badge));
+/* ---------------------------------------------------------------------- *
+ * Reel data from Instagram's own page (see page_hook.js).
+ * Instagram loads the next reels before you reach them; we hand those to
+ * the gateway so each one is already checked when you swipe to it.
+ * ---------------------------------------------------------------------- */
+TL.pageMedia = new Map();   // shortcode -> reel data as the page loaded it
+TL.pageOrder = [];          // shortcodes in the order Instagram listed them
+// Two kinds of pre-check, kept apart on purpose:
+//  - data: remember the next reels and fetch their poster's profile. Network
+//    only, no CPU, so it happens straight away.
+//  - audio: listen to the next reels. Uses the CPU, so it only starts once the
+//    reel on screen is finished — measured: doing both at once slowed the
+//    on-screen reel down and the pre-checks were thrown away anyway.
+TL.prefetchedData = new Set();
+TL.prefetchedAudio = new Set();
+const prefetchTimers = {};
+
+window.addEventListener("message", (e) => {
+  if (e.source !== window || !e.data || e.data.__trustlens !== "media") return;
+  if (!Array.isArray(e.data.items)) return;
+  for (const it of e.data.items.slice(0, 60)) {
+    if (!it || typeof it.code !== "string") continue;
+    const prev = TL.pageMedia.get(it.code) || {};
+    const merged = { ...prev };
+    for (const k in it) if (it[k] || merged[k] === undefined) merged[k] = it[k];
+    TL.pageMedia.set(it.code, merged);
+    if (!TL.pageOrder.includes(it.code)) TL.pageOrder.push(it.code);
+  }
+  TL.schedulePrefetch({ listen: false });
+  if (TL.currentIsFinished()) TL.schedulePrefetch({ listen: true });
+});
+
+/** Is the reel on screen fully checked (so the CPU is free for the next ones)? */
+TL.currentIsFinished = function () {
+  const cur = TL.observer && TL.observer.currentKey();
+  const done = cur && TL.cache.get(cur);
+  if (!done || done.status !== "done") return false;
+  const cov = done.verdict.coverage || {};
+  return cov.speech_read || !(cov.can_listen || cov.listening);
+};
+
+TL.schedulePrefetch = function ({ listen }) {
+  const kind = listen ? "audio" : "data";
+  if (prefetchTimers[kind]) clearTimeout(prefetchTimers[kind]);
+  prefetchTimers[kind] = setTimeout(() => {
+    prefetchTimers[kind] = null;
+    if (!TL.settings.enabled) return;
+    if (listen && TL.settings.autoTranscribe === false) return;
+    const done = listen ? TL.prefetchedAudio : TL.prefetchedData;
+    const cur = TL.observer && TL.observer.currentKey();
+    const at = TL.pageOrder.indexOf(cur);
+    const upcoming = (at >= 0 ? TL.pageOrder.slice(at + 1) : TL.pageOrder)
+      .filter((c) => c !== cur && !done.has(c))
+      .slice(0, listen ? 2 : 4)
+      .map((c) => TL.pageMedia.get(c))
+      .filter(Boolean);
+    if (!upcoming.length) return;
+    upcoming.forEach((m) => done.add(m.code));
+    TL.api.prefetch(upcoming, { listen });
+  }, listen ? 200 : 400);
+};
+
+TL.analyzePost = async function (postData, badge, { transcribe = false } = {}) {
+  const key = postData.key;
+  // One badge describes whatever is on screen. If you swiped on while this was
+  // running, the answer belongs to a reel you are no longer looking at and must
+  // not be painted over the current one.
+  const isCurrent = () => badge.isConnected && badge.dataset.tlKey === key;
+
+  if (!transcribe) TL.schedulePrefetch({ listen: false });   // you moved: line up the next reels
+
+  const cached = TL.cache.get(key);
+  if (cached && cached.status === "done" &&
+      (!transcribe || (cached.verdict.coverage || {}).speech_read)) {
+    if (isCurrent()) {
+      TL.ui.render(badge, cached.verdict, makeCtx(postData, badge));
+      maybeAutoListen(cached.verdict);
+      if (TL.currentIsFinished()) TL.schedulePrefetch({ listen: true });
+    }
     return cached.verdict;
   }
 
-  TL.ui.setPending(
-    badge,
-    transcribe ? "Listening to the video…" : "TrustLens is checking this post…"
-  );
-
-  // While /analyze is blocked on Whisper, poll the gateway so the badge can show
-  // real progress. Without this a multi-minute wait looks identical to a hang.
-  let ticker = null;
   if (transcribe) {
-    const t0 = Date.now();
-    const tick = async () => {
-      const p = await TL.api.progress(postData.page_url);
-      if (!p || p.state === "idle") {
-        TL.ui.setProgress(badge, 0, "Starting…",
-                          Math.round((Date.now() - t0) / 1000));
-        return;
-      }
-      if (p.state === "failed") {
-        TL.ui.setProgress(badge, 0, p.stage || "Failed",
-                          p.elapsed ?? Math.round((Date.now() - t0) / 1000));
-        return;
-      }
-      TL.ui.setProgress(badge, p.percent, p.stage,
-                        p.elapsed ?? Math.round((Date.now() - t0) / 1000));
-    };
-    tick();
-    ticker = setInterval(tick, 1500);
+    if (TL.listening.has(key)) return null;
+    TL.listening.add(key);
+    TL.ui.setListening(badge, "Listening…");
+  } else {
+    TL.ui.setPending(badge, postData.is_reel
+      ? "Fetching this reel from Instagram…"
+      : "TrustLens is checking this post…");
   }
 
-  // Profile stats are only visible on a profile page. Anywhere else we send
-  // nothing rather than zeros, and the gateway reports the account as unchecked.
+  // Poll the gateway for what it is doing right now, so the badge always shows
+  // a live step ("Checking @name's account…", "Listening… 40%") rather than a
+  // spinner that looks like a hang.
+  const tick = async () => {
+    const p = await TL.api.progress(postData.page_url);
+    if (!isCurrent() || !p || p.state === "idle") return;
+    if (transcribe) {
+      TL.ui.setListening(badge, typeof p.percent === "number"
+        ? `Listening… ${p.percent}%` : "Listening…");
+    } else if (p.stage && badge.classList.contains("tl-pending")) {
+      badge.querySelector(".tl-title").textContent = p.stage;
+    }
+  };
+  const ticker = setInterval(tick, 600);
+
+  // Profile stats read off an open profile page (free). Anywhere else the
+  // gateway fetches the poster's profile itself.
   const account = TL.ig.readProfile(postData.author);
 
   try {
@@ -285,21 +508,48 @@ TL.analyzePost = async function (postData, badge, { transcribe = false } = {}) {
         caption: postData.caption,
         on_screen_text: postData.on_screen_text,
         is_reel: postData.is_reel,
+        username: postData.author || (TL.pageMedia.get(key) || {}).username || "",
         account: account || undefined,
+        media: TL.pageMedia.get(key) || undefined,
+        // Start listening to the reel's audio on the server straight away,
+        // instead of after this answer comes back.
+        listen: !transcribe && TL.settings.autoTranscribe !== false,
       },
       { transcribe }
     );
 
-    TL.cache.set(cacheKey, { status: "done", verdict });
-    TL.ui.render(badge, verdict, makeCtx(postData, badge));
+    TL.cache.set(key, { status: "done", verdict });
+    if (isCurrent()) {
+      TL.ui.render(badge, verdict, makeCtx(postData, badge));
+      maybeAutoListen(verdict);
+      // This reel is done: use the free CPU to get the next ones ready.
+      if (TL.currentIsFinished()) TL.schedulePrefetch({ listen: true });
+    }
     return verdict;
   } catch (err) {
-    TL.cache.set(cacheKey, { status: "error", error: err.message });
-    TL.ui.setError(badge, err.message);
     TL.log("analysis failed", err);
+    if (isCurrent()) {
+      if (transcribe && cached && cached.verdict) {
+        // Keep the verdict we already had; just say the listening failed.
+        TL.ui.render(badge, cached.verdict, makeCtx(postData, badge));
+        TL.ui.setListening(badge, "Couldn't listen");
+      } else {
+        TL.ui.setError(badge, err.message);
+      }
+    }
     return null;
   } finally {
-    if (ticker) clearInterval(ticker);
+    clearInterval(ticker);
+    if (transcribe) TL.listening.delete(key);
+  }
+
+  function maybeAutoListen(v) {
+    if (transcribe || !TL.settings.autoTranscribe) return;
+    const cov = v.coverage || {};
+    if (cov.speech_read || !(cov.listening || cov.can_listen)) return;
+    // The server is usually already listening (started by the first request);
+    // this just waits for that job and paints the final verdict.
+    if (isCurrent()) TL.analyzePost(postData, badge, { transcribe: true });
   }
 };
 
@@ -308,6 +558,7 @@ function makeCtx(postData, badge) {
     isReel: postData.is_reel,
     onTranscribe: (btn) => {
       btn.disabled = true;
+      btn.textContent = "Listening…";
       TL.analyzePost(postData, badge, { transcribe: true });
     },
   };

@@ -24,8 +24,7 @@ def _clean(url: str) -> str:
 
 
 class Settings:
-    # ---- where the three modules are reachable ----
-    transcriber_url: str = _clean(os.getenv("TRANSCRIBER_URL", "http://127.0.0.1:8000"))
+    # ---- where the two model services are reachable ----
     classifier_url: str = _clean(os.getenv("CLASSIFIER_URL", "http://127.0.0.1:8001"))
     follower_url: str = _clean(os.getenv("FOLLOWER_URL", "http://127.0.0.1:8002"))
 
@@ -45,10 +44,8 @@ class Settings:
     port: int = int(os.getenv("GATEWAY_PORT", "8100"))
 
     # ---- timeouts (seconds) ----
-    # The classifier and account model answer in <1s; only leave the transcriber
-    # a long read budget because Whisper on CPU is slow.
+    # The classifier and account model answer in under a second.
     fast_timeout: float = float(os.getenv("FAST_TIMEOUT", "60"))
-    transcribe_timeout: float = float(os.getenv("TRANSCRIBE_TIMEOUT", "900"))
     poll_interval: float = float(os.getenv("POLL_INTERVAL", "1.5"))
 
     @property

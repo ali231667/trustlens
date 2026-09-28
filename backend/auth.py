@@ -110,7 +110,24 @@ def get_current_user(
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(401, "User no longer exists")
+    # Checked on every request, not only at login: a suspension has to take
+    # effect immediately, even for someone holding a still-valid 7-day token.
+    if user.is_active is False:
+        raise HTTPException(403, "This account has been suspended")
     return user
+
+
+def require_admin(current_user: User = Depends(get_current_user)) -> User:
+    """FastAPI dependency for every /admin route.
+
+    This is the actual security boundary. The frontend also hides the Admin
+    link from non-admins, but that is only presentation — anyone can type a
+    URL or call the API directly, so the check that matters lives here on
+    the server, where it cannot be bypassed from a browser.
+    """
+    if current_user.role != "admin":
+        raise HTTPException(403, "Admin access required")
+    return current_user
 
 
 def get_current_user_optional(
@@ -125,4 +142,9 @@ def get_current_user_optional(
         user_id = _decode_token(authorization.removeprefix("Bearer ").strip())
     except HTTPException:
         return None
-    return db.query(User).filter(User.id == user_id).first()
+    user = db.query(User).filter(User.id == user_id).first()
+    # A suspended user can still use the public scanner like any visitor,
+    # but the scan is not attached to their account.
+    if user is not None and user.is_active is False:
+        return None
+    return user

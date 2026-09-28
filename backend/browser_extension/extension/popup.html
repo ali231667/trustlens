@@ -47,6 +47,8 @@
       <span class="name">Misinformation model</span><span id="s-classifier">—</span></div>
     <div class="mod"><span class="dot" id="d-account_model"></span>
       <span class="name">Fake-account model</span><span id="s-account_model">—</span></div>
+    <div class="mod"><span class="dot" id="d-instagram_data"></span>
+      <span class="name">Instagram data (RapidAPI)</span><span id="s-instagram_data">—</span></div>
     <div class="mod"><span class="dot" id="d-transcriber"></span>
       <span class="name">Speech transcriber</span><span id="s-transcriber">—</span></div>
     <div class="mod"><span class="dot" id="d-gemini"></span>
@@ -57,9 +59,10 @@
   <div class="card">
     <label><input type="checkbox" id="enabled"> Enabled</label>
     <label><input type="checkbox" id="autoScan"> Check posts as I scroll</label>
-    <div class="hint">Reel audio is never transcribed automatically — each reel
-      badge has a <b>Listen to audio</b> button, because Whisper takes about as
-      long as the reel itself.</div>
+    <label><input type="checkbox" id="autoTranscribe"> Listen to a reel's audio when I stop on it</label>
+    <div class="hint">With the third box ticked, a reel's audio is listened to
+      automatically once you stop on it (a few seconds). Untick it to use the
+      <b>Listen to audio</b> button on each badge instead.</div>
   </div>
 
   <button id="scan">Check what's on screen now</button>

@@ -10,7 +10,7 @@ fake-follower models could answer the same question: the extension using one,
 the website using another, disagreeing about the same account.
 
 This version imports `backend/fake_follower.py` instead: the trained Random
-Forest (99.3%) that the live site already runs on every scan. The extension
+Forest (95.8% held-out accuracy) that the live site already runs on every scan. The extension
 and the website now cannot disagree, because there is only one model.
 
 Ali's XGBoost version is still in the repo at
@@ -54,7 +54,7 @@ if str(BACKEND_DIR) not in sys.path:
 
 _IMPORT_ERROR: str | None = None
 try:
-    from fake_follower import analyze_fake_followers  # type: ignore
+    from fake_follower import analyze_fake_followers, name_features  # type: ignore
 except Exception as exc:  # pragma: no cover - only hit on a broken install
     _IMPORT_ERROR = f"{type(exc).__name__}: {exc}"
 
@@ -72,6 +72,8 @@ UNCERTAIN_BAND_AT = 0.40     # site: "Moderate Risk — Suspicious"
 
 class AccountRequest(BaseModel):
     username: str = ""
+    full_name: str = ""
+    has_external_url: int = 0
     profile_pic: int = 1
     username_digit_ratio: float | None = None
     description_length: int = 0
@@ -132,6 +134,9 @@ def predict(req: AccountRequest):
         "follows_count": int(req.follows_count),
     }
 
+    # Same name-based inputs the website's scan passes, so the extension and
+    # the site give the same account the same score.
+    names = name_features(req.username, req.full_name)
     try:
         result = analyze_fake_followers(
             followers=raw["followers_count"],
@@ -139,12 +144,12 @@ def predict(req: AccountRequest):
             posts=raw["posts_count"],
             has_profile_pic=raw["profile_pic"],
             bio_length=raw["description_length"],
-            # The extension reads the rendered page, which does not expose
-            # whether the bio carries an external link. Passing 0 matches what
-            # the live site does when it has no value either.
-            has_external_url=0,
+            has_external_url=int(req.has_external_url),
             is_private=raw["private"],
             username_digit_ratio=raw["username_digit_ratio"],
+            fullname_words=names["fullname_words"],
+            fullname_digit_ratio=names["fullname_digit_ratio"],
+            name_equals_username=names["name_equals_username"],
         )
     except Exception as exc:
         raise HTTPException(422, f"Prediction failed: {exc}") from exc

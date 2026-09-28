@@ -7,7 +7,9 @@ import requests
 import os
 from dotenv import load_dotenv
 
-load_dotenv()  # reads your .env file
+# Load backend/.env by its own location, so the keys are found no matter
+# which folder the program was started from.
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
 RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY")
 RAPIDAPI_KEY_COMMENTS = os.getenv("RAPIDAPI_KEY_COMMENTS")
@@ -42,6 +44,14 @@ def fetch_instagram_profile(username: str) -> dict:
         raise Exception(f"Instagram API failed with status {response.status_code}")
 
     data = response.json()
+
+    # A missing account comes back as HTTP 200 with {"error": "...does not
+    # exist..."}. Reading that with .get(..., 0) used to turn it into a profile
+    # with 0 followers, 0 posts and no picture, which the fake-account model
+    # then scored as a certain bot. Refuse it instead of inventing data.
+    if not isinstance(data, dict) or data.get("error") or "follower_count" not in data:
+        reason = data.get("error") if isinstance(data, dict) else None
+        raise Exception(reason or f"No Instagram profile found for '{username}'.")
 
     profile_data = {
         "username":          data.get("username", username),
@@ -120,6 +130,61 @@ def fetch_engagement_data(username: str, amount: int = 12) -> dict:
         "posts_analyzed": len(likes),
         "post_codes": post_codes,
         "post_captions": post_captions
+    }
+
+
+def fetch_media_data(media_code: str) -> dict:
+    """
+    Fetches one post or reel by its shortcode (the ABC123 in /reel/ABC123/).
+    Used by the browser extension: the real caption, the real poster and the
+    direct video file come from here instead of being guessed from the page.
+    """
+    MEDIA_URL = f"https://{RAPIDAPI_HOST}/get_media_data_v2.php"
+
+    headers = {
+        "x-rapidapi-host": RAPIDAPI_HOST,
+        "x-rapidapi-key": RAPIDAPI_KEY
+    }
+
+    try:
+        response = requests.get(MEDIA_URL, headers=headers,
+                                params={"media_code": media_code}, timeout=20)
+    except requests.exceptions.Timeout:
+        raise Exception("Instagram media API took too long to respond (over 20s).")
+    except requests.exceptions.RequestException as e:
+        raise Exception(f"Could not reach Instagram media API: {e}")
+
+    if response.status_code != 200:
+        raise Exception(f"Media fetch failed with status {response.status_code}")
+
+    data = response.json()
+    if not isinstance(data, dict) or not data.get("code"):
+        raise Exception("Instagram returned no data for this post (deleted, private, or not found).")
+
+    user = data.get("user") or {}
+    caption_obj = data.get("caption") or {}
+    videos = data.get("video_versions") or []
+    # Carousels keep their video inside the first video slide.
+    if not videos:
+        for slide in data.get("carousel_media") or []:
+            if slide.get("video_versions"):
+                videos = slide["video_versions"]
+                break
+
+    return {
+        "code":          data.get("code"),
+        "caption":       (caption_obj.get("text") or "").strip(),
+        "username":      user.get("username", "") or "",
+        "full_name":     user.get("full_name", "") or "",
+        "is_verified":   bool(user.get("is_verified", False)),
+        "is_private":    bool(user.get("is_private", False)),
+        "is_video":      bool(videos),
+        "has_audio":     bool(data.get("has_audio", bool(videos))),
+        "video_url":     videos[0].get("url", "") if videos else "",
+        "like_count":    data.get("like_count") or 0,
+        "comment_count": data.get("comment_count") or 0,
+        "taken_at":      data.get("taken_at"),
+        "product_type":  data.get("product_type", ""),
     }
 
 

@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 
 import httpx
 
@@ -21,11 +20,9 @@ log = logging.getLogger(__name__)
 
 # Live transcription progress, keyed by the reel's page URL.
 #
-# /analyze is one blocking call that can run for minutes, so the badge has no way
-# to learn how far along it is. The transcriber already reports exact progress
-# ("Transcribing 26s / 56s", 52%) on every poll — this relays it, and the
-# extension polls GET /progress to keep the badge honest about what is happening.
-# Without it a six-minute wait is indistinguishable from a hang.
+# /analyze blocks while a reel is being listened to, so the badge has no other
+# way to learn how far along it is. reel_audio.py reports progress here and the
+# extension polls GET /progress, so a wait never looks like a hang.
 PROGRESS: dict[str, dict] = {}
 
 
@@ -46,7 +43,34 @@ def clear_progress(page_url: str) -> None:
 # --------------------------------------------------------------------------- #
 # Misinformation classifier  (D:\trustlens_post_checker, port 8001)
 # --------------------------------------------------------------------------- #
+# The same text gets classified again when you return to a reel, and a
+# pre-checked reel was already classified in the background. Remember results.
+_classify_cache: dict[str, dict] = {}
+_account_cache: dict[str, dict] = {}
+
+
+def _remember(cache: dict, key: str, value: dict) -> dict:
+    if value.get("available"):
+        if len(cache) > 500:
+            cache.pop(next(iter(cache)))
+        cache[key] = value
+    return value
+
+
 async def classify_text(text: str) -> dict:
+    if text and text in _classify_cache:
+        return dict(_classify_cache[text])
+    return _remember(_classify_cache, text or "", await _classify_text(text))
+
+
+async def predict_account(features: dict) -> dict:
+    key = repr(sorted(features.items()))
+    if key in _account_cache:
+        return dict(_account_cache[key])
+    return _remember(_account_cache, key, await _predict_account(features))
+
+
+async def _classify_text(text: str) -> dict:
     """Send caption/transcript text to the post checker.
 
     Returns its full report on success. On failure returns
@@ -89,7 +113,7 @@ async def classify_text(text: str) -> dict:
 # --------------------------------------------------------------------------- #
 # Fake follower / bot account model  (thin wrapper API, port 8002)
 # --------------------------------------------------------------------------- #
-async def predict_account(features: dict) -> dict:
+async def _predict_account(features: dict) -> dict:
     """Classify one Instagram account from the 7 raw profile features."""
     url = f"{settings.follower_url}/predict-account"
     try:
@@ -112,116 +136,6 @@ async def predict_account(features: dict) -> dict:
 
 
 # --------------------------------------------------------------------------- #
-# Video-to-text transcriber  (D:\video-to-text transcriber, port 8000)
-# --------------------------------------------------------------------------- #
-async def transcribe_reel(page_url: str, language: str | None = None) -> dict:
-    """Transcribe the spoken audio of a reel, given its Instagram page URL.
-
-    Uses the transcriber's /transcribe/url path deliberately: that route goes
-    through yt-dlp with the project's verified cookies.txt, which is the one
-    Instagram download path already proven to work. It side-steps the blob:
-    problem entirely, the page never has to hand over media bytes.
-
-    Submits the job, then polls. Whisper on CPU is roughly realtime, so a 30s
-    reel is a ~30s wait; the caller decides whether to make the user wait.
-    """
-    base = f"{settings.transcriber_url}/api/v1"
-    started = time.monotonic()
-    set_progress(page_url, state="starting", percent=0,
-                 stage="Fetching the video from Instagram…")
-
-    try:
-        async with httpx.AsyncClient(timeout=settings.fast_timeout) as client:
-            submit = await client.post(
-                f"{base}/transcribe/url",
-                json={"url": page_url, "language": language, "wait": False},
-            )
-            submit.raise_for_status()
-            job = submit.json()
-    except httpx.HTTPStatusError as exc:
-        set_progress(page_url, state="failed", stage=_detail(exc))
-        return {"available": False, "error": _detail(exc)}
-    except Exception as exc:
-        log.warning("Transcriber unreachable at %s: %s", base, exc)
-        set_progress(page_url, state="failed", stage="Transcriber not running")
-        return {
-            "available": False,
-            "error": f"Transcriber not reachable on {settings.transcriber_url}.",
-        }
-
-    # A cache hit comes back already completed, with the result inline.
-    if job.get("status") == "completed" and job.get("result"):
-        clear_progress(page_url)
-        return _shape_transcript(job["result"], cached=True,
-                                 seconds=time.monotonic() - started)
-
-    job_id = job.get("job_id")
-    if not job_id:
-        set_progress(page_url, state="failed", stage="No job id returned")
-        return {"available": False, "error": "Transcriber did not return a job id."}
-
-    # ---- poll until the job settles ----
-    try:
-        async with httpx.AsyncClient(timeout=settings.fast_timeout) as client:
-            while time.monotonic() - started < settings.transcribe_timeout:
-                await asyncio.sleep(settings.poll_interval)
-                r = await client.get(f"{base}/jobs/{job_id}")
-                r.raise_for_status()
-                state = r.json()
-
-                set_progress(
-                    page_url,
-                    state="running",
-                    percent=round(float(state.get("progress") or 0.0) * 100),
-                    stage=state.get("stage") or "working",
-                    elapsed=round(time.monotonic() - started),
-                )
-
-                if state.get("status") == "completed":
-                    clear_progress(page_url)
-                    return _shape_transcript(
-                        state.get("result") or {}, cached=bool(state.get("cache_hit")),
-                        seconds=time.monotonic() - started,
-                    )
-                if state.get("status") == "failed":
-                    err = state.get("error") or "Transcription failed."
-                    set_progress(page_url, state="failed", stage=err[:140])
-                    return {"available": False, "error": err}
-    except Exception as exc:
-        set_progress(page_url, state="failed", stage=str(exc)[:140])
-        return {"available": False, "error": f"Lost contact with transcriber: {exc}"}
-
-    set_progress(page_url, state="failed", stage="Timed out")
-    return {
-        "available": False,
-        "error": f"Transcription still running after "
-                 f"{settings.transcribe_timeout:.0f}s — gave up waiting.",
-    }
-
-
-def _shape_transcript(result: dict, cached: bool, seconds: float) -> dict:
-    """Pull the classifier contract out of a finished transcription job.
-
-    `classifier_input` is the transcriber's documented hand-off block; reading it
-    (rather than the raw segments) keeps this gateway on the module's public
-    contract instead of its internals.
-    """
-    ci = result.get("classifier_input") or {}
-    return {
-        "available": True,
-        "text": ci.get("text", "") or "",
-        "language": ci.get("language"),
-        "confidence": ci.get("confidence", 0.0),
-        "quality": ci.get("quality", "unknown"),
-        "is_reliable": ci.get("is_reliable", False),
-        "sources": ci.get("sources", []),
-        "char_count": ci.get("char_count", 0),
-        "cached": cached,
-        "elapsed_seconds": round(seconds, 1),
-    }
-
-
-# --------------------------------------------------------------------------- #
 # Health
 # --------------------------------------------------------------------------- #
 async def _probe(name: str, url: str) -> tuple[str, dict]:
@@ -229,11 +143,9 @@ async def _probe(name: str, url: str) -> tuple[str, dict]:
 
     `status_code < 400`, not `< 500`. A 404 means that health path does not
     exist, so something else is answering on that port — which is not a
-    hypothetical: the transcriber's default port 8000 is the same port the
-    main TrustLens website runs on. With the old `< 500` check, having the
-    website running made the gateway report "transcriber: up" off the
-    website's own 404, and the extension would then offer a "Listen to audio"
-    button that could only ever fail. Reporting a service as up because
+    hypothetical: the old external transcriber's port 8000 was the same port
+    the main TrustLens website runs on, and with a `< 500` check the gateway
+    reported "transcriber: up" off the website's own 404. Reporting a service as up because
     *something* answered is exactly the kind of false reassurance this
     codebase refuses to give anywhere else.
     """
@@ -246,9 +158,8 @@ async def _probe(name: str, url: str) -> tuple[str, dict]:
 
 
 async def health_report() -> dict:
-    """Ask all three modules at once whether they are up."""
+    """Ask the two model services at once whether they are up."""
     checks = await asyncio.gather(
-        _probe("transcriber", f"{settings.transcriber_url}/api/v1/health"),
         _probe("classifier", f"{settings.classifier_url}/health"),
         _probe("account_model", f"{settings.follower_url}/health"),
     )

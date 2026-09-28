@@ -1,0 +1,4 @@
+.nf { position: relative; overflow: clip; padding-block: clamp(56px, 9vw, 140px); }
+.nf-inner { position: relative; z-index: 1; display: grid; gap: 22px; justify-items: start; }
+.nf-title { font-size: clamp(76px, 15vw, 220px); }
+.nf-actions { display: flex; flex-wrap: wrap; gap: 12px; }

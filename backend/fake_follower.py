@@ -3,7 +3,7 @@
 # ============================================================
 
 import pickle
-import numpy as np
+import pandas as pd
 import os
 
 # Load the trained model from our paper implementation.
@@ -91,21 +91,41 @@ def _load_model():
     return _MODEL
 
 
+def name_features(username, full_name):
+    """The four name-based inputs the model was trained on, computed the way
+    the training dataset defines them. The live site used to leave these at
+    fixed defaults even though every scan already has the username and full
+    name, so the model was being asked to judge with inputs it never saw in
+    training.
+    """
+    u = username or ""
+    f = (full_name or "").strip()
+    return {
+        "username_digit_ratio": round(sum(c.isdigit() for c in u) / len(u), 4) if u else 0.0,
+        "fullname_words": len(f.split()),
+        "fullname_digit_ratio": round(sum(c.isdigit() for c in f) / len(f), 4) if f else 0.0,
+        "name_equals_username": 1 if f and f.lower() == u.lower() else 0,
+    }
+
+
 def analyze_fake_followers(followers, following, posts,
                            has_profile_pic, bio_length,
                            has_external_url, is_private,
-                           username_digit_ratio=0.0):
-    # `username_digit_ratio` is the model's "nums/length username" feature.
-    # It defaults to 0.0 so every existing caller behaves exactly as before —
-    # the live site doesn't read usernames, so it has never had a real value
-    # to pass. The browser extension does read the username off the page, so
-    # it passes the real ratio and gets a slightly better-informed prediction
-    # from the same model.
+                           username_digit_ratio=0.0,
+                           fullname_words=1, fullname_digit_ratio=0.0,
+                           name_equals_username=0):
+    # WHAT THIS MEASURES: the probability that THIS account is itself a fake
+    # or spam account, judged from its own profile. It does not look at the
+    # account's followers. Name-based inputs default to neutral values for
+    # callers that don't have them; see name_features().
     row = build_features(
         followers, following, posts, has_profile_pic, bio_length,
         has_external_url, is_private, username_digit_ratio,
+        fullname_words, fullname_digit_ratio, name_equals_username,
     )
-    features = np.array([row])
+    # Named columns, exactly as the model was trained — a bare array works
+    # but makes scikit-learn warn on every single prediction.
+    features = pd.DataFrame([row], columns=FEATURE_NAMES)
 
     # Read back off the shared builder rather than recomputing, so the values
     # reported to the caller are exactly the ones the model was given.

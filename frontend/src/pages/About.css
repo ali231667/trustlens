@@ -1,144 +1,70 @@
-.about-page {
-  position: relative;
-  min-height: 100vh;
-  overflow: hidden;
-}
+/* ---- About / How it works ---- */
+.ab-sw-blue { --sw: #405DE6; }
+.ab-sw-purple { --sw: #833AB4; }
+.ab-sw-pink { --sw: #E1306C; }
+.ab-sw-orange { --sw: #F77737; }
 
-.about-hero {
-  position: relative;
-  z-index: 1;
-  padding: 60px 24px 50px;
-  text-align: center;
-}
+.ab-sec-head { margin-bottom: clamp(28px, 4vw, 48px); }
+.ab-sec-title { font-size: clamp(44px, 6vw, 88px); margin-top: 14px; }
 
-.about-title {
-  font-size: 42px;
-  font-weight: 700;
-  line-height: 1.15;
-  color: var(--color-text);
-  letter-spacing: -1px;
-  margin: 20px 0;
-}
-
-.about-title-accent {
-  color: var(--color-accent);
-  text-shadow: 0 0 24px rgba(0, 212, 170, 0.4);
-}
-
-.about-subtitle {
-  font-size: 16px;
-  color: var(--color-text-muted);
-  max-width: 520px;
-  margin: 0 auto;
-  line-height: 1.6;
-}
-
-.about-steps {
-  position: relative;
-  z-index: 1;
-  max-width: 760px;
-  margin: 0 auto;
-  padding: 20px 24px 80px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.about-step {
+.ab-steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: clamp(14px, 1.6vw, 22px); }
+.ab-step { display: grid; gap: 12px; align-content: start; justify-items: start; padding: 0 22px 24px; overflow: hidden; }
+.ab-step-art {
+  width: calc(100% + 44px);
+  margin: 0 -22px 6px;
+  height: 150px;
   display: grid;
-  grid-template-columns: 60px 1fr;
-  gap: 24px;
-  align-items: start;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: 12px;
-  padding: 28px 32px;
-  border-left: 6px solid;
-  transition: transform 0.2s ease;
+  place-items: center;
+  background:
+    radial-gradient(circle at 20% 30%, rgba(255, 255, 255, 0.28) 0 18px, transparent 19px),
+    repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.2) 0 12px, transparent 12px 26px),
+    var(--sw);
 }
-
-.about-step:hover {
-  transform: translateX(4px);
+.ab-step-art span {
+  font: 800 64px/1 var(--display);
+  letter-spacing: -0.05em;
+  color: #FFFFFF;
+  text-shadow: 4px 4px 0 var(--plum);
+  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
+.ab-step:hover .ab-step-art span { transform: scale(1.12) rotate(-4deg); }
+.ab-step h3 { font-size: 21px; font-weight: 800; letter-spacing: -0.02em; }
+.ab-step p { font-size: 14.5px; color: var(--ink-soft); }
 
-.step-green { border-left-color: #2ED9A8; }
-.step-amber { border-left-color: #F2B84D; }
-.step-red { border-left-color: #FF6B5B; }
+.ab-honest { display: grid; grid-template-columns: 1fr 1.2fr; gap: clamp(28px, 5vw, 72px); align-items: start; }
+.ab-honest-copy { display: grid; gap: 20px; justify-items: start; position: sticky; top: 100px; }
+.ab-table { overflow: hidden; }
+.ab-row { display: grid; gap: 6px; padding: 18px 22px; border-top: 1px solid var(--ink-hair); }
+.ab-row:first-child { border-top: 0; }
+.ab-row-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ab-row-top strong { font-size: 17px; }
+.ab-row p { font-size: 14.5px; color: var(--ink-soft); }
+.ab-row-proof { font-size: 12.5px; font-weight: 700; color: var(--pink); }
 
-.about-step-number {
-  font-family: var(--font-mono);
-  font-size: 30px;
-  font-weight: 700;
-  color: rgba(255, 255, 255, 0.14);
-  letter-spacing: -1px;
+.ab-numbers .tl-eyebrow { margin-bottom: 22px; }
+.ab-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; }
+.ab-stats > div { display: grid; gap: 8px; padding-left: 20px; border-left: 2px solid rgba(255, 255, 255, 0.18); }
+.ab-stat-value { font-size: clamp(52px, 6vw, 88px); font-weight: 800; letter-spacing: -0.05em; line-height: 1; }
+.ab-stat-label { font-size: 14.5px; color: rgba(255, 255, 255, 0.76); max-width: 30ch; }
+
+.ab-team { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(28px, 5vw, 64px); align-items: center; }
+.ab-team .tl-lede { margin-top: 18px; }
+.ab-people { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.ab-person { display: flex; align-items: center; gap: 14px; padding: 16px 18px; }
+.ab-person strong { display: block; font-size: 16px; }
+.ab-person span span { font-size: 13px; color: var(--ink-soft); }
+
+.ab-cta-inner { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; flex-wrap: wrap; }
+.ab-cta-title { font-size: clamp(52px, 8vw, 120px); }
+
+@media (max-width: 1080px) {
+  .ab-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
-
-.about-step-tag {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 1px;
-  padding: 4px 10px;
-  border-radius: 20px;
-  display: inline-block;
-  margin-bottom: 10px;
+@media (max-width: 860px) {
+  .ab-honest, .ab-team { grid-template-columns: 1fr; }
+  .ab-honest-copy { position: static; }
+  .ab-stats { grid-template-columns: 1fr; }
 }
-
-.tag-green { background: rgba(46, 217, 168, 0.14); color: #2ED9A8; }
-.tag-amber { background: rgba(242, 184, 77, 0.14); color: #F2B84D; }
-.tag-red { background: rgba(255, 107, 91, 0.14); color: #FF6B5B; }
-
-.about-step h3 {
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--color-text);
-  margin-bottom: 8px;
-}
-
-.about-step p {
-  font-size: 14px;
-  color: var(--color-text-muted);
-  line-height: 1.6;
-}
-
-.about-stat-banner {
-  position: relative;
-  z-index: 1;
-  background: var(--color-surface);
-  border-top: 1px solid var(--color-border);
-  padding: 56px 24px;
-  display: flex;
-  justify-content: center;
-  gap: 80px;
-}
-
-.about-stat {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-}
-
-.about-stat-value {
-  font-family: var(--font-mono);
-  font-size: 40px;
-  font-weight: 700;
-  color: var(--color-accent);
-  letter-spacing: -1px;
-  text-shadow: 0 0 20px rgba(0, 212, 170, 0.35);
-}
-
-.about-stat-label {
-  font-size: 13px;
-  color: var(--color-text-muted);
-  margin-top: 8px;
-  max-width: 140px;
-}
-
-@media (max-width: 700px) {
-  .about-stat-banner {
-    flex-direction: column;
-    align-items: center;
-    gap: 32px;
-  }
+@media (max-width: 560px) {
+  .ab-steps, .ab-people { grid-template-columns: 1fr; }
 }

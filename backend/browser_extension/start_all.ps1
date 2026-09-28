@@ -18,9 +18,9 @@
 # separately, and the extension cannot disagree with the website because there
 # is only one of each model.
 #
-# The transcriber is still external and still optional — Module 12 has not been
-# integrated yet. The gateway degrades honestly without it: a reel's spoken
-# audio is reported as "not checked" rather than being assumed innocent.
+# Reel audio is now transcribed inside the gateway itself (faster-whisper), and
+# the post/account data comes from RapidAPI via backend/data_ingestion.py, so
+# there is nothing external to start any more.
 # ---------------------------------------------------------------------------
 
 $ErrorActionPreference = "Stop"
@@ -31,9 +31,6 @@ $ErrorActionPreference = "Stop"
 $Gateway = Join-Path $PSScriptRoot "gateway"
 $Backend = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $Python  = Join-Path $Backend "venv\Scripts\python.exe"
-
-# Optional, external, not part of this repo. Leave as-is if you do not have it.
-$Transcriber = "D:\video-to-text transcriber"
 
 if (-not (Test-Path $Python)) {
     Write-Host "Could not find the backend venv at $Python" -ForegroundColor Red
@@ -47,9 +44,13 @@ function Start-Service-Window($Title, $WorkDir, $Command) {
         return
     }
     Write-Host "  start $Title" -ForegroundColor Green
+    # If the service ever stops (for example Windows ran out of memory and
+    # killed it), it restarts by itself instead of silently staying down.
+    # Close the window to stop it for good.
+    $Loop = "while (`$true) { $Command; Write-Host 'Service stopped - restarting in 3 seconds (close this window to stop it).' -ForegroundColor Yellow; Start-Sleep 3 }"
     Start-Process powershell -ArgumentList @(
         "-NoExit", "-Command",
-        "`$Host.UI.RawUI.WindowTitle='TrustLens - $Title'; Set-Location '$WorkDir'; $Command"
+        "`$Host.UI.RawUI.WindowTitle='TrustLens - $Title'; Set-Location '$WorkDir'; $Loop"
     )
 }
 
@@ -64,17 +65,11 @@ Start-Service-Window "classifier :8001" $Gateway `
 Start-Service-Window "account model :8002" $Gateway `
     "& '$Python' -m uvicorn follower_api:app --port 8002"
 
-# 3. The gateway the extension talks to (port 8100).
+# 3. The gateway the extension talks to (port 8100). Also fetches Instagram data
+#    through RapidAPI and listens to reel audio (loads the Whisper model).
 Start-Service-Window "gateway :8100" $Gateway `
     "& '$Python' -m uvicorn main:app --port 8100"
-
-# 4. Optional transcriber (port 8000), external to this repo. Skipped silently
-#    if you do not have it - reels then report speech as "not checked".
-Start-Service-Window "transcriber :8000 (optional)" $Transcriber `
-    ".\.venv\Scripts\python.exe run.py"
 
 Write-Host "`nGive them ~30s (the classifier loads a 1 GB model), then check:" -ForegroundColor Cyan
 Write-Host "  http://127.0.0.1:8100/health`n"
 Write-Host "The extension popup shows the same status with a dot per service.`n"
-Write-Host "NOTE: the main TrustLens website also uses port 8000. If you run" -ForegroundColor Yellow
-Write-Host "both, do not also start the optional transcriber - they collide.`n" -ForegroundColor Yellow
